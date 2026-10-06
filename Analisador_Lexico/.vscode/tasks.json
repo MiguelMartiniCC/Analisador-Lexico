@@ -1,0 +1,30 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "type": "cppbuild",
+            "label": "C/C++: gcc.exe build active file",
+            "command": "gcc",
+            "args": [
+                "-Wall",
+                "-I${workspaceFolder}/include",
+                "${workspaceFolder}/src/symbol_table.c",
+                "${workspaceFolder}/src/lexer.c",
+                "${workspaceFolder}/src/main.c",
+                "-o",
+                "${workspaceFolder}/lexer.exe"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "detail": "Compila o projeto Analisador Lexico inteiro."
+        }
+    ]
+}
