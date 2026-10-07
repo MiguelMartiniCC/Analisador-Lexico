@@ -1,6 +1,19 @@
-int x = 10;
-int y = 10;
-int z = x + y;
-if (z == 10) {
-    z = z + 1;
+// programa de teste completo
+int main() {
+    int idade = 20;
+    float pi = 3.14;
+    char nome[10];
+    boolean ok;
+    for (i = 0; i < 10; i = i + 1) {
+        if (idade >= 18 && !ok || idade != 0) {
+            println("maior de idade);
+        } else {
+            idade = idade % 2;
+        }
+    }
+    while (x <= 5) { x = x * 2 / 1 - 3; }
+    scanf(idade, pi);
+    return 0;
 }
+// erros propositais
+@ 3. & | "sem fechar

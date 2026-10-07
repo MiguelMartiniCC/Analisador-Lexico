@@ -54,7 +54,7 @@ int main(int argc, char *argv[]) {
      * Ao final da análise léxica,
      * exibe a Tabela de Símbolos.
      */
-    printf("\n=== TABELA DE SÍMBOLOS ===\n");
+    
     printSymbolTable();
 
     fclose(file);
