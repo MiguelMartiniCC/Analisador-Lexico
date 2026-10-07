@@ -6,7 +6,7 @@ int main() {
     boolean ok;
     for (i = 0; i < 10; i = i + 1) {
         if (idade >= 18 && !ok || idade != 0) {
-            println("maior de idade");
+            println("maior de idade);
         } else {
             idade = idade % 2;
         }

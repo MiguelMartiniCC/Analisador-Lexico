@@ -33,10 +33,10 @@ static const int keywordCount = sizeof(keywords) / sizeof(keywords[0]);
 
 const char* tokenTypeToString(TokenType type) {
     switch (type) {
-        case TOKEN_ID:            return "ID";
+       case TOKEN_ID:            return "ID";
         case TOKEN_NUM_INT:       return "NUM_INT";
         case TOKEN_NUM_DEC:       return "NUM_DEC";
-        case TOKEN_TEXT:          return "TEXT";
+        case TOKEN_TEXT:          return "TEXTO";
         case TOKEN_INT:           return "INT";
         case TOKEN_FLOAT:         return "FLOAT";
         case TOKEN_CHAR:          return "CHAR";
@@ -50,26 +50,26 @@ const char* tokenTypeToString(TokenType type) {
         case TOKEN_PRINTLN:       return "PRINTLN";
         case TOKEN_MAIN:          return "MAIN";
         case TOKEN_RETURN:        return "RETURN";
-        case TOKEN_ATRIB:         return "ATRIB";
-        case TOKEN_SUM:           return "SUM";
-        case TOKEN_SUB:           return "SUB";
-        case TOKEN_MULT:          return "MULT";
-        case TOKEN_DIV:           return "DIV";
-        case TOKEN_MOD:           return "MOD";
-        case TOKEN_AND:           return "AND";
-        case TOKEN_OR:            return "OR";
-        case TOKEN_NOT:           return "NOT";
+        case TOKEN_ATRIB:         return "=";
+        case TOKEN_SUM:           return "+";
+        case TOKEN_SUB:           return "-";
+        case TOKEN_MULT:          return "*";
+        case TOKEN_DIV:           return "/";
+        case TOKEN_MOD:           return "%";
+        case TOKEN_AND:           return "&&";
+        case TOKEN_OR:            return "||";
+        case TOKEN_NOT:           return "!";
         case TOKEN_COMP:          return "COMP";
-        case TOKEN_OPEN_PAREN:    return "OPEN_PAREN";
-        case TOKEN_CLOSE_PAREN:   return "CLOSE_PAREN";
-        case TOKEN_OPEN_BRACKET:  return "OPEN_BRACKET";
-        case TOKEN_CLOSE_BRACKET: return "CLOSE_BRACKET";
-        case TOKEN_OPEN_BRACE:    return "OPEN_BRACE";
-        case TOKEN_CLOSE_BRACE:   return "CLOSE_BRACE";
-        case TOKEN_COMMA:         return "COMMA";
-        case TOKEN_SEMICOLON:     return "SEMICOLON";
-        case TOKEN_EOF:           return "EOF";
-        default:                  return "ERROR";
+        case TOKEN_OPEN_PAREN:    return "(";
+        case TOKEN_CLOSE_PAREN:   return ")";
+        case TOKEN_OPEN_BRACKET:  return "[";
+        case TOKEN_CLOSE_BRACKET: return "]";
+        case TOKEN_OPEN_BRACE:    return "{";
+        case TOKEN_CLOSE_BRACE:   return "}";
+        case TOKEN_COMMA:         return ",";
+        case TOKEN_SEMICOLON:     return ";";
+        case TOKEN_EOF:           return "FIM_ARQUIVO";
+        default:                  return "ERRO";
     }
 }
 
