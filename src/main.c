@@ -2,18 +2,22 @@
 #include <stdlib.h>
 
 #include "lexer.h"
+#include "include/parser.h"
 #include "symbol_table.h"
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
 
-    if (argc < 2) {
+    if (argc < 2)
+    {
         printf("Uso: %s <ficheiro_fonte>\n", argv[0]);
         return 1;
     }
 
     FILE *file = fopen(argv[1], "r");
 
-    if (!file) {
+    if (!file)
+    {
         perror("Erro ao abrir o ficheiro");
         return 1;
     }
@@ -38,15 +42,15 @@ int main(int argc, char *argv[]) {
      * Executa a análise léxica.
      * O lexer lê o arquivo e produz os tokens.
      */
-    do {
+    do
+    {
         t = getNextToken(&lexer);
 
         printf(
             "[Linha %02d] %-18s : %s\n",
             t.line,
             tokenTypeToString(t.type),
-            t.lexeme
-        );
+            t.lexeme);
 
     } while (t.type != TOKEN_EOF);
 
@@ -54,8 +58,26 @@ int main(int argc, char *argv[]) {
      * Ao final da análise léxica,
      * exibe a Tabela de Símbolos.
      */
-    
+
     printSymbolTable();
+
+    /*
+     * Volta o ponteiro do ficheiro ao início para permitir
+     * que o Parser releia os tokens do zero.
+     */
+
+    fseek(file, 0, SEEK_SET);
+    initLexer(&lexer, file);
+
+    printf("\n=== ANÁLISE SINTÁTICA ===\n");
+
+    /*
+     * Inicializa e executa o Parser.
+     */
+
+    Parser parser;
+    initParser(&parser, &lexer);
+    parse(&parser);
 
     fclose(file);
 
