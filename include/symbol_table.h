@@ -4,7 +4,7 @@
 #include "token.h"
 
 typedef struct {
-    char name[64];
+    char name[256];
     TokenType type;
 } Symbol;
 
