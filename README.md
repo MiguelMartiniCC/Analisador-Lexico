@@ -17,11 +17,17 @@ Compilador/
 │   │   ├── token.h             # TokenType e struct Token
 │   │   ├── symbol_table.h      # Interface da Tabela de Símbolos
 │   │   └── lexer.h             # Interface do analisador léxico
+│   │
 │   ├── src/                    # Implementações (.c)
-│   │   ├── lexer.c
-│   │   ├── symbol_table.c
-│   │   └── main.c              # Ponto de entrada do lexer
-│   └── teste.txt               # Arquivo de entrada para testes
+│   │   ├── lexer/
+│   │   │   └── lexer.c         # Implementação do analisador léxico
+│   │   ├── symbol_table/
+│   │   │   └── symbol_table.c  # Implementação da Tabela de Símbolos
+│   │   └── main.c              # Ponto de entrada do analisador
+│   │
+│   └── tests/                  # Arquivos utilizados nos testes
+│       └── lexer/
+│           └── teste.txt       # Arquivo de entrada para testes do lexer
 │
 └── Analisador_Sintatico/       # Análise sintática (Parser) — em construção
 ```
@@ -78,7 +84,7 @@ No VS Code, a task padrão de build já usa esses caminhos a partir da raiz `Com
 A partir da raiz do repositório, o equivalente é:
 
 ```powershell
-gcc -Wall -IAnalisador_Lexico/include Analisador_Lexico/src/symbol_table.c Analisador_Lexico/src/lexer.c Analisador_Lexico/src/main.c -o Analisador_Lexico/lexer.exe
+gcc -Wall -Iinclude src/symbol_table/symbol_table.c src/lexer/lexer.c src/main.c -o lexer.exe
 ```
 
 ### 3. Executar
@@ -86,7 +92,7 @@ gcc -Wall -IAnalisador_Lexico/include Analisador_Lexico/src/symbol_table.c Anali
 Ainda em `Analisador_Lexico`:
 
 ```powershell
-.\lexer.exe teste.txt
+.\lexer.exe testes/lexer/teste.txt
 ```
 
 O programa lê `teste.txt`, imprime os tokens e preenche a Tabela de Símbolos.
