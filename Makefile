@@ -3,7 +3,8 @@ CFLAGS = -Wall -Iinclude
 
 SRC = src/symbol_table/symbol_table.c \
       src/lexer/lexer.c \
-      src/main.c
+      src/main.c \
+      src/parser/parser.c
 
 FILE ?= testes/lexer/teste.txt
 
