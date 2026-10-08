@@ -1,0 +1,41 @@
+void soma(int a, float b) {
+    float resultado;
+
+    resultado = a + b;
+
+    println("Resultado:", resultado);
+
+    return resultado;
+}
+
+main() {
+    int idade, i, x;
+    float pi;
+    boolean ok;
+    char[10] nome;
+
+    idade = 20;
+    pi = 3.14;
+    x = 1;
+    ok = 0;
+
+    scanf(idade, pi);
+
+    println("Idade:", idade);
+    println("Pi:", pi);
+    println("Nome:", nome);
+
+    while (x <= 5) {
+        if (idade >= 18 && !ok || idade != 0) {
+            println("maior de idade");
+        } else {
+            idade = idade % 2;
+        }
+
+        x = x + 1;
+    }
+
+    idade = func soma(idade, pi);
+
+    return 0;
+}
