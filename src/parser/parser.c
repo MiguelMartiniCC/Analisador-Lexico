@@ -268,6 +268,9 @@ static void statement(Parser *parser)
     case TOKEN_IF:
         ifStatement(parser);
         break;
+    case TOKEN_FUNC:
+        functionCall(parser);
+        break;
     case TOKEN_WHILE:
         whileStatement(parser);
         break;
@@ -410,7 +413,7 @@ static void assignmentStatement(Parser *parser)
 // COMPLEMENTO → EXPRESSÃO | FUNÇÃO]
 static void complement(Parser *parser)
 {
-    if (parser->currentToken.type == TOKEN_OPEN_PAREN)
+    if (parser->currentToken.type == TOKEN_FUNC)
     {
         functionCall(parser);
     }
@@ -423,9 +426,9 @@ static void complement(Parser *parser)
 // FUNÇÃO → func id ( ARGUMENTOS ) IMPORTANTE: ADICIONAR O FUNC NO TOKEN.H E NA LEITURA DO LEXER.
 static void functionCall(Parser *parser)
 {
-    // match(parser, TOKEN_FUNC);
-    match(parser, TOKEN_OPEN_PAREN);
+    match(parser, TOKEN_FUNC);
     match(parser, TOKEN_ID);
+    match(parser, TOKEN_OPEN_PAREN);
     arguments(parser);
     match(parser, TOKEN_CLOSE_PAREN);
 }

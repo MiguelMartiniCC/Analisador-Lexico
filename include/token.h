@@ -23,6 +23,7 @@ typedef enum {
     TOKEN_PRINTLN,
     TOKEN_MAIN,
     TOKEN_RETURN,
+    TOKEN_FUNC,
     
     //Operadores
 
