@@ -2,7 +2,7 @@
 #include <stdlib.h>
 
 #include "lexer.h"
-#include "include/parser.h"
+#include "parser.h"
 #include "symbol_table.h"
 
 int main(int argc, char *argv[])
