@@ -9,11 +9,11 @@ SRC = src/symbol_table/symbol_table.c \
 FILE ?= testes/lexer/teste.txt
 
 ifeq ($(OS),Windows_NT)
-    TARGET = lexer.exe
+    TARGET = compiler.exe
     RUN    = .\$(TARGET)
     CLEAN  = del /Q /F $(TARGET) 2>nul
 else
-    TARGET = lexer
+    TARGET = compiler
     RUN    = ./$(TARGET)
     CLEAN  = rm -f $(TARGET)
 endif
