@@ -6,7 +6,7 @@ SRC = src/symbol_table/symbol_table.c \
       src/main.c \
       src/parser/parser.c
 
-FILE ?= testes/lexer/teste.txt
+FILE ?= testes/compiler/teste.txt
 
 ifeq ($(OS),Windows_NT)
     TARGET = compiler.exe
