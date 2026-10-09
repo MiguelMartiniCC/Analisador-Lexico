@@ -26,7 +26,8 @@ static const Keyword keywords[] = {
     {"scanf",   TOKEN_SCANF},
     {"println", TOKEN_PRINTLN},
     {"main",    TOKEN_MAIN},
-    {"return",  TOKEN_RETURN}
+    {"return",  TOKEN_RETURN},
+    {"func",    TOKEN_FUNC},
 };
 
 static const int keywordCount = sizeof(keywords) / sizeof(keywords[0]);
@@ -50,6 +51,7 @@ const char* tokenTypeToString(TokenType type) {
         case TOKEN_PRINTLN:       return "PRINTLN";
         case TOKEN_MAIN:          return "MAIN";
         case TOKEN_RETURN:        return "RETURN";
+        case TOKEN_FUNC:          return "FUNC";
         case TOKEN_ATRIB:         return "=";
         case TOKEN_SUM:           return "+";
         case TOKEN_SUB:           return "-";

@@ -3,16 +3,17 @@ CFLAGS = -Wall -Iinclude
 
 SRC = src/symbol_table/symbol_table.c \
       src/lexer/lexer.c \
-      src/main.c
+      src/main.c \
+      src/parser/parser.c
 
 FILE ?= testes/lexer/teste.txt
 
 ifeq ($(OS),Windows_NT)
-    TARGET = lexer.exe
+    TARGET = compiler.exe
     RUN    = .\$(TARGET)
     CLEAN  = del /Q /F $(TARGET) 2>nul
 else
-    TARGET = lexer
+    TARGET = compiler
     RUN    = ./$(TARGET)
     CLEAN  = rm -f $(TARGET)
 endif
