@@ -1,0 +1,8 @@
+// Erro esperado: Erro Semântico [Linha 5]: O operador '+' exige operandos int ou float, mas foi encontrado 'int' e 'texto'.
+main() {
+    int x;
+
+    x = 1 + "abc";
+
+    return 0;
+}

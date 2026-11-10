@@ -1,0 +1,9 @@
+// Erro esperado: Erro Semântico [Linha 6]: 'v' tem 1 dimensão(ões), mas foi indexado com 2 índice(s).
+main() {
+    int[3] v;
+    int x;
+
+    x = v[0][1];
+
+    return 0;
+}

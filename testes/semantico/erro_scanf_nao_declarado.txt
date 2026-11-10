@@ -1,0 +1,8 @@
+// Erro esperado: Erro Semântico [Linha 5]: A variável 'z' não foi declarada.
+main() {
+    int x;
+
+    scanf(x, z);
+
+    return 0;
+}

@@ -1,0 +1,10 @@
+// Erro esperado: Erro Semântico [Linha 7]: Atribuição incompatível: 'x' é 'int', mas o valor é 'float'.
+main() {
+    int x;
+    float y;
+
+    y = 2.5;
+    x = y;
+
+    return 0;
+}

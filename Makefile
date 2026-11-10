@@ -4,7 +4,8 @@ CFLAGS = -Wall -Iinclude
 SRC = src/symbol_table/symbol_table.c \
       src/lexer/lexer.c \
       src/main.c \
-      src/parser/parser.c
+      src/parser/parser.c \
+      src/semantic/semantic.c
 
 FILE ?= testes/compiler/teste.txt
 

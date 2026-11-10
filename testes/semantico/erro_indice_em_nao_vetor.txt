@@ -1,0 +1,9 @@
+// Erro esperado: Erro Semântico [Linha 6]: 'x' não é um vetor e não pode receber índice.
+main() {
+    int x;
+
+    x = 1;
+    x = x[0];
+
+    return 0;
+}

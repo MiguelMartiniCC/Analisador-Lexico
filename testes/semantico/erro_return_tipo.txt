@@ -1,0 +1,10 @@
+// Erro esperado: Erro Semântico [Linha 5]: Retorno incompatível: a função 'metade' retorna 'int', mas o valor é 'float'.
+int metade(int a) {
+    float r;
+    r = a / 2.0;
+    return r;
+}
+
+main() {
+    return 0;
+}

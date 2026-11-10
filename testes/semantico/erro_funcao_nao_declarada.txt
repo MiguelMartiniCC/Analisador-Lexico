@@ -1,0 +1,9 @@
+// Erro esperado: Erro Semântico [Linha 6]: A função 'dobro' não foi declarada (ela precisa ser declarada antes da chamada).
+main() {
+    int x;
+
+    x = 1;
+    x = func dobro(x);
+
+    return 0;
+}

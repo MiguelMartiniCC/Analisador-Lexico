@@ -1,0 +1,10 @@
+// Erro esperado: Erro Semântico [Linha 3]: 'a' já foi declarado na função 'dobro'.
+int dobro(int a) {
+    int a;
+
+    return a;
+}
+
+main() {
+    return 0;
+}

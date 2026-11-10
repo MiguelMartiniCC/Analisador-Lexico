@@ -1,0 +1,7 @@
+// Erro esperado: Erro Semântico [Linha 4]: 'x' já foi declarado na função 'main'.
+main() {
+    int x;
+    float x;
+
+    return 0;
+}

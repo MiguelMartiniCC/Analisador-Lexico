@@ -1,0 +1,12 @@
+// Erro esperado: Erro Semântico [Linha 6]: A função 'f' já foi declarada.
+int f() {
+    return 1;
+}
+
+int f() {
+    return 2;
+}
+
+main() {
+    return 0;
+}
