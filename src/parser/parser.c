@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "parser.h"
+#include "semantic.h"
 
 static void advance(Parser *parser)
 {
@@ -27,22 +28,22 @@ static void match(Parser *parser, TokenType expectedType)
 static void program(Parser *parser);
 static void functionList(Parser *parser);
 static void functionDecl(Parser *parser);
-static void returnType(Parser *parser);
-static void type(Parser *parser);
-static void baseType(Parser *parser);
-static void dimension(Parser *parser);
+static SemType returnType(Parser *parser);
+static SemType type(Parser *parser);
+static BaseType baseType(Parser *parser);
+static int dimension(Parser *parser);
 static void parameters(Parser *parser);
 static void parameterList(Parser *parser);
 static void mainFunction(Parser *parser);
 static void block(Parser *parser);
 static void varList(Parser *parser);
-static void idList(Parser *parser);
+static void idList(Parser *parser, SemType varType);
 static void statementList(Parser *parser);
 static void statement(Parser *parser);
 static void readStatement(Parser *parser);
 static void readTerm(Parser *parser);
 static void newReadTerm(Parser *parser);
-static void dimension2(Parser *parser);
+static int dimension2(Parser *parser);
 static void writeStatement(Parser *parser);
 static void writeTerm(Parser *parser);
 static void newWriteTerm(Parser *parser);
@@ -50,28 +51,28 @@ static void ifStatement(Parser *parser);
 static void elseClause(Parser *parser);
 static void whileStatement(Parser *parser);
 static void assignmentStatement(Parser *parser);
-static void complement(Parser *parser);
-static void functionCall(Parser *parser);
-static void arguments(Parser *parser);
-static void newArgument(Parser *parser);
+static SemType complement(Parser *parser);
+static SemType functionCall(Parser *parser);
+static int arguments(Parser *parser, const char *functionName);
+static int newArgument(Parser *parser, const char *functionName, int position);
 static void returnStatement(Parser *parser);
-static void expression(Parser *parser);
-static void orExpr(Parser *parser);
-static void orExpr2(Parser *parser);
-static void andExpr(Parser *parser);
-static void andExpr2(Parser *parser);
-static void relationalExpr(Parser *parser);
-static void relationalExpr2(Parser *parser);
-static void additiveExpr(Parser *parser);
-static void additiveExpr2(Parser *parser);
+static SemType expression(Parser *parser);
+static SemType orExpr(Parser *parser);
+static SemType orExpr2(Parser *parser, SemType left);
+static SemType andExpr(Parser *parser);
+static SemType andExpr2(Parser *parser, SemType left);
+static SemType relationalExpr(Parser *parser);
+static SemType relationalExpr2(Parser *parser, SemType left);
+static SemType additiveExpr(Parser *parser);
+static SemType additiveExpr2(Parser *parser, SemType left);
 static void additiveOp(Parser *parser);
-static void multiplicativeExpr(Parser *parser);
-static void multiplicativeExpr2(Parser *parser);
+static SemType multiplicativeExpr(Parser *parser);
+static SemType multiplicativeExpr2(Parser *parser, SemType left);
 static void multiplicativeOp(Parser *parser);
-static void factor(Parser *parser);
-static void term(Parser *parser);
-static void sign(Parser *parser);
-static void constant(Parser *parser);
+static SemType factor(Parser *parser);
+static SemType term(Parser *parser);
+static int sign(Parser *parser);
+static SemType constant(Parser *parser);
 
 // PROGRAMA → LISTAFUNÇÕES PRINCIPAL
 static void program(Parser *parser)
@@ -102,51 +103,57 @@ static void functionList(Parser *parser)
 // DECFUNÇÃO → TIPORETORNO id ( PARÂMETROS ) BLOCO
 static void functionDecl(Parser *parser)
 {
-    returnType(parser);
+    SemType functionType = returnType(parser);
+
+    Token id = parser->currentToken;
     match(parser, TOKEN_ID);
+    beginFunction(id.lexeme, functionType, id.line);
+
     match(parser, TOKEN_OPEN_PAREN);
     parameters(parser);
     match(parser, TOKEN_CLOSE_PAREN);
     block(parser);
+
+    endFunction();
 }
 
 // TIPORETORNO → TIPO | void
-static void returnType(Parser *parser)
+static SemType returnType(Parser *parser)
 {
     if (parser->currentToken.type == TOKEN_VOID)
     {
         match(parser, TOKEN_VOID);
+        return makeType(TYPE_VOID, 0);
     }
-    else
-    {
-        type(parser);
-    }
+
+    return type(parser);
 }
 
 // TIPO → TIPOBASE DIMENSÃO
-static void type(Parser *parser)
+static SemType type(Parser *parser)
 {
-    baseType(parser);
-    dimension(parser);
+    BaseType base = baseType(parser);
+    int dimensions = dimension(parser);
+    return makeType(base, dimensions);
 }
 
 // TIPOBASE → char | float | int | boolean
-static void baseType(Parser *parser)
+static BaseType baseType(Parser *parser)
 {
     switch (parser->currentToken.type)
     {
     case TOKEN_CHAR:
         match(parser, TOKEN_CHAR);
-        break;
+        return TYPE_CHAR;
     case TOKEN_FLOAT:
         match(parser, TOKEN_FLOAT);
-        break;
+        return TYPE_FLOAT;
     case TOKEN_INT:
         match(parser, TOKEN_INT);
-        break;
+        return TYPE_INT;
     case TOKEN_BOOLEAN:
         match(parser, TOKEN_BOOLEAN);
-        break;
+        return TYPE_BOOLEAN;
     default:
         printf("Erro Sintático [Linha %d]: Esperado tipo base, mas foi encontrado '%s' ('%s')\n",
                parser->currentToken.line,
@@ -157,15 +164,17 @@ static void baseType(Parser *parser)
 }
 
 // DIMENSÃO → [ num_int ] DIMENSÃO | ε
-static void dimension(Parser *parser)
+// Devolve quantas dimensões foram declaradas.
+static int dimension(Parser *parser)
 {
     if (parser->currentToken.type == TOKEN_OPEN_BRACKET)
     {
         match(parser, TOKEN_OPEN_BRACKET);
         match(parser, TOKEN_NUM_INT);
         match(parser, TOKEN_CLOSE_BRACKET);
-        dimension(parser);
+        return 1 + dimension(parser);
     }
+    return 0;
 }
 
 // PARÂMETROS → TIPO id LISTAPARAMETROS | ε
@@ -176,8 +185,10 @@ static void parameters(Parser *parser)
         parser->currentToken.type == TOKEN_CHAR ||
         parser->currentToken.type == TOKEN_BOOLEAN)
     {
-        type(parser);
+        SemType paramType = type(parser);
+        Token id = parser->currentToken;
         match(parser, TOKEN_ID);
+        declareParameter(id.lexeme, paramType, id.line);
         parameterList(parser);
     }
 }
@@ -188,8 +199,10 @@ static void parameterList(Parser *parser)
     if (parser->currentToken.type == TOKEN_COMMA)
     {
         match(parser, TOKEN_COMMA);
-        type(parser);
+        SemType paramType = type(parser);
+        Token id = parser->currentToken;
         match(parser, TOKEN_ID);
+        declareParameter(id.lexeme, paramType, id.line);
         parameterList(parser);
     }
 }
@@ -197,10 +210,17 @@ static void parameterList(Parser *parser)
 // PRINCIPAL → main ( ) BLOCO
 static void mainFunction(Parser *parser)
 {
+    Token mainToken = parser->currentToken;
     match(parser, TOKEN_MAIN);
+
+    // main devolve int (por isso "return 0;" é válido)
+    beginFunction(mainToken.lexeme, makeType(TYPE_INT, 0), mainToken.line);
+
     match(parser, TOKEN_OPEN_PAREN);
     match(parser, TOKEN_CLOSE_PAREN);
     block(parser);
+
+    endFunction();
 }
 
 // BLOCO → { LISTAVARIÁVEIS COMANDOS }
@@ -220,22 +240,26 @@ static void varList(Parser *parser)
         parser->currentToken.type == TOKEN_CHAR ||
         parser->currentToken.type == TOKEN_BOOLEAN)
     {
-        type(parser);
+        SemType varType = type(parser);
+        Token id = parser->currentToken;
         match(parser, TOKEN_ID);
-        idList(parser);
+        declareVariable(id.lexeme, varType, id.line);
+        idList(parser, varType);
         match(parser, TOKEN_SEMICOLON);
         varList(parser);
     }
 }
 
 // LISTAID → , id LISTAID | ε
-static void idList(Parser *parser)
+static void idList(Parser *parser, SemType varType)
 {
     if (parser->currentToken.type == TOKEN_COMMA)
     {
         match(parser, TOKEN_COMMA);
+        Token id = parser->currentToken;
         match(parser, TOKEN_ID);
-        idList(parser);
+        declareVariable(id.lexeme, varType, id.line);
+        idList(parser, varType);
     }
 }
 
@@ -303,8 +327,11 @@ static void readStatement(Parser *parser)
 // TERMOLEITURA → id DIMENSAO2
 static void readTerm(Parser *parser)
 {
+    Token id = parser->currentToken;
     match(parser, TOKEN_ID);
-    dimension2(parser);
+    SemType varType = requireVariable(id.lexeme, id.line);
+    int indexCount = dimension2(parser);
+    indexedType(varType, indexCount, id.lexeme, id.line);
 }
 
 // NOVOTERMOLEITURA → , TERMOLEITURA NOVOTERMOLEITURA | ε
@@ -319,15 +346,19 @@ static void newReadTerm(Parser *parser)
 }
 
 // DIMENSAO2 → [ EXPR_ADITIVA ] DIMENSAO2 | ε
-static void dimension2(Parser *parser)
+// Confere que cada índice é int e devolve quantos índices foram usados.
+static int dimension2(Parser *parser)
 {
     if (parser->currentToken.type == TOKEN_OPEN_BRACKET)
     {
         match(parser, TOKEN_OPEN_BRACKET);
-        additiveExpr(parser);
+        int line = parser->currentToken.line;
+        SemType index = additiveExpr(parser);
+        requireIntIndex(index, line);
         match(parser, TOKEN_CLOSE_BRACKET);
-        dimension2(parser);
+        return 1 + dimension2(parser);
     }
+    return 0;
 }
 
 // ESCRITA → println ( TERMOESCRITA NOVOTERMOESCRITA ) ;
@@ -346,8 +377,11 @@ static void writeTerm(Parser *parser)
 {
     if (parser->currentToken.type == TOKEN_ID)
     {
+        Token id = parser->currentToken;
         match(parser, TOKEN_ID);
-        dimension2(parser);
+        SemType varType = requireVariable(id.lexeme, id.line);
+        int indexCount = dimension2(parser);
+        indexedType(varType, indexCount, id.lexeme, id.line);
     }
     else if (parser->currentToken.type == TOKEN_TEXT)
     {
@@ -375,7 +409,9 @@ static void ifStatement(Parser *parser)
 {
     match(parser, TOKEN_IF);
     match(parser, TOKEN_OPEN_PAREN);
-    expression(parser);
+    int line = parser->currentToken.line;
+    SemType condition = expression(parser);
+    requireCondition(condition, "if", line);
     match(parser, TOKEN_CLOSE_PAREN);
     block(parser);
     elseClause(parser);
@@ -396,7 +432,9 @@ static void whileStatement(Parser *parser)
 {
     match(parser, TOKEN_WHILE);
     match(parser, TOKEN_OPEN_PAREN);
-    expression(parser);
+    int line = parser->currentToken.line;
+    SemType condition = expression(parser);
+    requireCondition(condition, "while", line);
     match(parser, TOKEN_CLOSE_PAREN);
     block(parser);
 }
@@ -404,37 +442,45 @@ static void whileStatement(Parser *parser)
 // ATRIBUIÇÃO → id = COMPLEMENTO ;
 static void assignmentStatement(Parser *parser)
 {
+    Token id = parser->currentToken;
     match(parser, TOKEN_ID);
+    SemType target = requireVariable(id.lexeme, id.line);
     match(parser, TOKEN_ATRIB);
-    complement(parser);
+    SemType value = complement(parser);
+    checkAssignment(id.lexeme, target, value, id.line);
     match(parser, TOKEN_SEMICOLON);
 }
 
 // COMPLEMENTO → EXPRESSÃO | FUNÇÃO]
-static void complement(Parser *parser)
+// Devolve o tipo do valor: o retorno da função ou o tipo da expressão.
+static SemType complement(Parser *parser)
 {
     if (parser->currentToken.type == TOKEN_FUNC)
     {
-        functionCall(parser);
+        return functionCall(parser);
     }
-    else
-    {
-        expression(parser);
-    }
+
+    return expression(parser);
 }
 
 // FUNÇÃO → func id ( ARGUMENTOS ) IMPORTANTE: ADICIONAR O FUNC NO TOKEN.H E NA LEITURA DO LEXER.
-static void functionCall(Parser *parser)
+// Devolve o tipo de retorno da função chamada.
+static SemType functionCall(Parser *parser)
 {
     match(parser, TOKEN_FUNC);
+    Token id = parser->currentToken;
     match(parser, TOKEN_ID);
+    SemType result = requireFunction(id.lexeme, id.line);
     match(parser, TOKEN_OPEN_PAREN);
-    arguments(parser);
+    int argumentCount = arguments(parser, id.lexeme);
     match(parser, TOKEN_CLOSE_PAREN);
+    checkArgumentCount(id.lexeme, argumentCount, id.line);
+    return result;
 }
 
 // ARGUMENTOS → EXPRESSÃO NOVO_ARGUMENTO | ε
-static void arguments(Parser *parser)
+// Confere o tipo de cada argumento e devolve quantos argumentos a chamada tem.
+static int arguments(Parser *parser, const char *functionName)
 {
     if (parser->currentToken.type == TOKEN_SUM ||
         parser->currentToken.type == TOKEN_SUB ||
@@ -445,106 +491,129 @@ static void arguments(Parser *parser)
         parser->currentToken.type == TOKEN_NUM_DEC ||
         parser->currentToken.type == TOKEN_TEXT)
     {
-        expression(parser);
-        newArgument(parser);
+        int line = parser->currentToken.line;
+        SemType argument = expression(parser);
+        checkArgument(functionName, 0, argument, line);
+        return 1 + newArgument(parser, functionName, 1);
     }
+    return 0;
 }
 
 // NOVO_ARGUMENTO → , EXPRESSÃO NOVO_ARGUMENTO | ε
-static void newArgument(Parser *parser)
+// 'position' é a posição (a partir de 0) do próximo argumento.
+static int newArgument(Parser *parser, const char *functionName, int position)
 {
     if (parser->currentToken.type == TOKEN_COMMA)
     {
         match(parser, TOKEN_COMMA);
-        expression(parser);
-        newArgument(parser);
+        int line = parser->currentToken.line;
+        SemType argument = expression(parser);
+        checkArgument(functionName, position, argument, line);
+        return 1 + newArgument(parser, functionName, position + 1);
     }
+    return 0;
 }
 
 // RETORNO → return EXPRESSÃO ;
 static void returnStatement(Parser *parser)
 {
+    Token returnToken = parser->currentToken;
     match(parser, TOKEN_RETURN);
-    expression(parser);
+    SemType value = expression(parser);
+    checkReturn(value, returnToken.line);
     match(parser, TOKEN_SEMICOLON);
 }
 
 // EXPRESSÃO → EXPR_OU
-static void expression(Parser *parser)
+// As funções de expressão devolvem o tipo do que reconheceram.
+static SemType expression(Parser *parser)
 {
-    orExpr(parser);
+    return orExpr(parser);
 }
 
 // EXPR_OU → EXPR_E EXPR_OU2
-static void orExpr(Parser *parser)
+static SemType orExpr(Parser *parser)
 {
-    andExpr(parser);
-    orExpr2(parser);
+    SemType left = andExpr(parser);
+    return orExpr2(parser, left);
 }
 
 // EXPR_OU2 → || EXPR_E EXPR_OU2 | ε
-static void orExpr2(Parser *parser)
+// 'left' é o tipo do que já foi lido à esquerda do operador.
+static SemType orExpr2(Parser *parser, SemType left)
 {
     if (parser->currentToken.type == TOKEN_OR)
     {
+        Token op = parser->currentToken;
         match(parser, TOKEN_OR);
-        andExpr(parser);
-        orExpr2(parser);
+        SemType right = andExpr(parser);
+        SemType result = logicalType(left, right, op.lexeme, op.line);
+        return orExpr2(parser, result);
     }
+    return left;
 }
 
 // EXPR_E → EXPR_RELACIONAL EXPR_E2
-static void andExpr(Parser *parser)
+static SemType andExpr(Parser *parser)
 {
-    relationalExpr(parser);
-    andExpr2(parser);
+    SemType left = relationalExpr(parser);
+    return andExpr2(parser, left);
 }
 
 // EXPR_E2 → && EXPR_RELACIONAL EXPR_E2 | ε
-static void andExpr2(Parser *parser)
+static SemType andExpr2(Parser *parser, SemType left)
 {
     if (parser->currentToken.type == TOKEN_AND)
     {
+        Token op = parser->currentToken;
         match(parser, TOKEN_AND);
-        relationalExpr(parser);
-        andExpr2(parser);
+        SemType right = relationalExpr(parser);
+        SemType result = logicalType(left, right, op.lexeme, op.line);
+        return andExpr2(parser, result);
     }
+    return left;
 }
 
 // EXPR_RELACIONAL → EXPR_ADITIVA EXPR_ RELACIONAL2
-static void relationalExpr(Parser *parser)
+static SemType relationalExpr(Parser *parser)
 {
-    additiveExpr(parser);
-    relationalExpr2(parser);
+    SemType left = additiveExpr(parser);
+    return relationalExpr2(parser, left);
 }
 
 // EXPR_RELACIONAL2 → comp EXPR_ADITIVA | ε
-static void relationalExpr2(Parser *parser)
+static SemType relationalExpr2(Parser *parser, SemType left)
 {
     if (parser->currentToken.type == TOKEN_COMP)
     {
+        Token op = parser->currentToken;
         match(parser, TOKEN_COMP);
-        additiveExpr(parser);
+        SemType right = additiveExpr(parser);
+        return comparisonType(left, right, op.lexeme, op.line);
     }
+    return left;
 }
 
 // EXPR_ADITIVA → EXPR_MULTIPLICATIVA EXPR_ADITIVA2
-static void additiveExpr(Parser *parser)
+static SemType additiveExpr(Parser *parser)
 {
-    multiplicativeExpr(parser);
-    additiveExpr2(parser);
+    SemType left = multiplicativeExpr(parser);
+    return additiveExpr2(parser, left);
 }
 
 // EXPR_ADITIVA2 → OP_ADITIVO EXPR_MULTIPLICATIVA EXPR_ADITIVA2 | ε
-static void additiveExpr2(Parser *parser)
+static SemType additiveExpr2(Parser *parser, SemType left)
 {
     if (parser->currentToken.type == TOKEN_SUM ||
         parser->currentToken.type == TOKEN_SUB)
     {
+        Token op = parser->currentToken;
         additiveOp(parser);
-        multiplicativeExpr(parser);
-        additiveExpr2(parser);
+        SemType right = multiplicativeExpr(parser);
+        SemType result = arithmeticType(left, right, op.lexeme, op.line);
+        return additiveExpr2(parser, result);
     }
+    return left;
 }
 
 // OP_ADITIVO → + | -
@@ -568,23 +637,26 @@ static void additiveOp(Parser *parser)
 }
 
 // EXPR_MULTIPLICATIVA → FATOR EXPR_MULTIPLICATIVA2
-static void multiplicativeExpr(Parser *parser)
+static SemType multiplicativeExpr(Parser *parser)
 {
-    factor(parser);
-    multiplicativeExpr2(parser);
+    SemType left = factor(parser);
+    return multiplicativeExpr2(parser, left);
 }
 
 // EXPR_MULTIPLICATIVA2 → OP_MULTIPLICATIVO FATOR EXPR_MULTIPLICATIVA2 | ε
-static void multiplicativeExpr2(Parser *parser)
+static SemType multiplicativeExpr2(Parser *parser, SemType left)
 {
     if (parser->currentToken.type == TOKEN_MULT ||
         parser->currentToken.type == TOKEN_DIV ||
         parser->currentToken.type == TOKEN_MOD)
     {
+        Token op = parser->currentToken;
         multiplicativeOp(parser);
-        factor(parser);
-        multiplicativeExpr2(parser);
+        SemType right = factor(parser);
+        SemType result = arithmeticType(left, right, op.lexeme, op.line);
+        return multiplicativeExpr2(parser, result);
     }
+    return left;
 }
 
 // OP_MULTIPLICATIVO → * | / | %
@@ -611,75 +683,92 @@ static void multiplicativeOp(Parser *parser)
 }
 
 // FATOR → SINAL TERMO | texto | ! FATOR | ( EXPRESSÃO )
-static void factor(Parser *parser)
+static SemType factor(Parser *parser)
 {
     switch (parser->currentToken.type)
     {
     case TOKEN_TEXT:
         match(parser, TOKEN_TEXT);
-        break;
+        return makeType(TYPE_TEXT, 0);
     case TOKEN_NOT:
+    {
+        Token op = parser->currentToken;
         match(parser, TOKEN_NOT);
-        factor(parser);
-        break;
+        SemType operand = factor(parser);
+        return notType(operand, op.line);
+    }
     case TOKEN_OPEN_PAREN:
+    {
         match(parser, TOKEN_OPEN_PAREN);
-        expression(parser);
+        SemType inner = expression(parser);
         match(parser, TOKEN_CLOSE_PAREN);
-        break;
+        return inner;
+    }
     default:
-        sign(parser);
-        term(parser);
-        break;
+    {
+        Token signToken = parser->currentToken;
+        int hasSign = sign(parser);
+        SemType value = term(parser);
+        if (hasSign)
+        {
+            return signType(value, signToken.lexeme, signToken.line);
+        }
+        return value;
+    }
     }
 }
 
 // TERMO → id DIMENSAO2 | CONSTANTE
-static void term(Parser *parser)
+static SemType term(Parser *parser)
 {
     if (parser->currentToken.type == TOKEN_ID)
     {
+        Token id = parser->currentToken;
         match(parser, TOKEN_ID);
-        dimension2(parser);
+        SemType varType = requireVariable(id.lexeme, id.line);
+        int indexCount = dimension2(parser);
+        return indexedType(varType, indexCount, id.lexeme, id.line);
     }
-    else
-    {
-        constant(parser);
-    }
+
+    return constant(parser);
 }
 
 // SINAL → + | - | ε
-static void sign(Parser *parser)
+// Devolve 1 se havia um sinal (e ele foi consumido), 0 caso contrário.
+static int sign(Parser *parser)
 {
     if (parser->currentToken.type == TOKEN_SUM)
     {
         match(parser, TOKEN_SUM);
+        return 1;
     }
-    else if (parser->currentToken.type == TOKEN_SUB)
+    if (parser->currentToken.type == TOKEN_SUB)
     {
         match(parser, TOKEN_SUB);
+        return 1;
     }
+    return 0;
 }
 
 // CONSTANTE → num_int | num_dec
-static void constant(Parser *parser)
+static SemType constant(Parser *parser)
 {
     if (parser->currentToken.type == TOKEN_NUM_INT)
     {
         match(parser, TOKEN_NUM_INT);
+        return makeType(TYPE_INT, 0);
     }
-    else if (parser->currentToken.type == TOKEN_NUM_DEC)
+    if (parser->currentToken.type == TOKEN_NUM_DEC)
     {
         match(parser, TOKEN_NUM_DEC);
+        return makeType(TYPE_FLOAT, 0);
     }
-    else
-    {
-        printf("Erro Sintático [Linha %d]: Esperado constante, mas foi encontrado '%s' ('%s')\n",
-               parser->currentToken.line,
-               parser->currentToken.lexeme,
-               tokenTypeToString(parser->currentToken.type));
-        exit(EXIT_FAILURE);
-    }
+
+    printf("Erro Sintático [Linha %d]: Esperado constante, mas foi encontrado '%s' ('%s')\n",
+           parser->currentToken.line,
+           parser->currentToken.lexeme,
+           tokenTypeToString(parser->currentToken.type));
+    exit(EXIT_FAILURE);
 }
 
 void initParser(Parser *parser, Lexer *lexer)

@@ -1,0 +1,9 @@
+// Erro esperado: Erro Semântico [Linha 6]: A variável 'y' não foi declarada.
+main() {
+    int x;
+
+    x = 1;
+    x = y + 1;
+
+    return 0;
+}

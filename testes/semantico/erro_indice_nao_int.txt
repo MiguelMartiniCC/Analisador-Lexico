@@ -1,0 +1,9 @@
+// Erro esperado: Erro Semântico [Linha 6]: O índice de um vetor deve ser int, mas foi encontrado 'float'.
+main() {
+    int[3] v;
+    int x;
+
+    x = v[1.5];
+
+    return 0;
+}

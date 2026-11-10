@@ -1,0 +1,8 @@
+// Erro esperado: Erro Semântico [Linha 2]: O parâmetro 'a' já foi declarado na função 'soma'.
+int soma(int a, int a) {
+    return a;
+}
+
+main() {
+    return 0;
+}

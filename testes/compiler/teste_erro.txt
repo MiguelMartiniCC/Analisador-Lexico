@@ -1,4 +1,4 @@
-void soma(int a, float b) {
+float soma(int a, float b) {
     float resultado;
 
     resultado = a + b;
@@ -35,7 +35,7 @@ main() {
         x = x + 1;
     }
 
-    idade = func soma(idade, pi);
+    pi = func soma(idade, pi);
 
     return 0;
 }

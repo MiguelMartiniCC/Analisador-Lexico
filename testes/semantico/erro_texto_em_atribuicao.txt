@@ -1,0 +1,8 @@
+// Erro esperado: Erro Semântico [Linha 5]: Atribuição incompatível: 'c' é 'char', mas o valor é 'texto'.
+main() {
+    char c;
+
+    c = "abc";
+
+    return 0;
+}

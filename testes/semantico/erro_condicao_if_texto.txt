@@ -1,0 +1,9 @@
+// Erro esperado: Erro Semântico [Linha 4]: A condição do 'if' deve ser boolean ou int, mas foi encontrado 'texto'.
+main() {
+    int x;
+    if ("abc") {
+        x = 1;
+    }
+
+    return 0;
+}

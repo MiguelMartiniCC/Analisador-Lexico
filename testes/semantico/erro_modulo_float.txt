@@ -1,0 +1,9 @@
+// Erro esperado: Erro Semântico [Linha 6]: O operador '%' exige operandos int, mas foi encontrado 'float' e 'int'.
+main() {
+    float f;
+
+    f = 5.5;
+    f = f % 2;
+
+    return 0;
+}

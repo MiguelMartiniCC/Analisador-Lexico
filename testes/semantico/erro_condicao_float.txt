@@ -1,0 +1,11 @@
+// Erro esperado: Erro Semântico [Linha 6]: A condição do 'while' deve ser boolean ou int, mas foi encontrado 'float'.
+main() {
+    float f;
+
+    f = 1.5;
+    while (f) {
+        f = f - 1;
+    }
+
+    return 0;
+}

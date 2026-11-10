@@ -1,0 +1,9 @@
+// Erro esperado: Erro Semântico [Linha 4]: A função 'mostrar' é void e não pode retornar valor.
+void mostrar(int a) {
+    println(a);
+    return a;
+}
+
+main() {
+    return 0;
+}

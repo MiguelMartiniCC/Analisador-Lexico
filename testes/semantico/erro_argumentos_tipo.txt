@@ -1,0 +1,13 @@
+// Erro esperado: Erro Semântico [Linha 10]: Argumento 2 da chamada de 'soma': esperado 'int', mas foi encontrado 'float'.
+int soma(int a, int b) {
+    return a + b;
+}
+
+main() {
+    int x;
+    float f;
+    f = 1.5;
+    x = func soma(1, f);
+
+    return 0;
+}

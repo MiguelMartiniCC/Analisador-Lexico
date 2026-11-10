@@ -1,0 +1,13 @@
+// Erro esperado: Erro Semântico [Linha 10]: Uma função void não retorna valor, então não pode ser atribuída a 'x'.
+void mostrar(int a) {
+    println(a);
+}
+
+main() {
+    int x;
+
+    x = 1;
+    x = func mostrar(x);
+
+    return 0;
+}

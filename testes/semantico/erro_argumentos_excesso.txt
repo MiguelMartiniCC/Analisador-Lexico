@@ -1,0 +1,12 @@
+// Erro esperado: Erro Semântico [Linha 9]: A função 'soma' espera 2 argumento(s), mas a chamada tem 3.
+int soma(int a, int b) {
+    return a + b;
+}
+
+main() {
+    int x;
+
+    x = func soma(1, 2, 3);
+
+    return 0;
+}

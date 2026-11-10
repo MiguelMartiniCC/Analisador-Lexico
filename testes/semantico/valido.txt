@@ -1,0 +1,63 @@
+// Programa valido: deve passar nas tres fases.
+// Cobre recursao, vetores, parametros com o mesmo nome em funcoes
+// diferentes, conversao int -> float, int usado como boolean e texto
+// passado a parametro char.
+
+int fatorial(int n) {
+    int resultado, anterior;
+
+    resultado = 1;
+
+    if (n > 1) {
+        anterior = func fatorial(n - 1);
+        resultado = n * anterior;
+    }
+
+    return resultado;
+}
+
+float media(int a, int b) {
+    float resultado;
+
+    resultado = (a + b) / 2.0;
+
+    return resultado;
+}
+
+int soma(int[3] valores) {
+    return valores[0] + valores[1] + valores[2];
+}
+
+boolean maior(int a, int b) {
+    boolean resultado;
+
+    resultado = a > b;
+
+    return resultado;
+}
+
+main() {
+    int[3] valores;
+    int[2][2] matriz;
+    int total, fat;
+    float m;
+    boolean ok, resultado;
+
+    ok = 1;
+
+    scanf(valores[0], valores[1], valores[2], matriz[1][0]);
+
+    total = func soma(valores);
+    m = func media(total, matriz[1][0]);
+    fat = func fatorial(5);
+    resultado = func maior(fat, 100);
+    m = total;
+
+    if (resultado && !ok || m >= 1.5) {
+        println("m:", m, "total:", total, valores);
+    } else {
+        println("fatorial:", fat);
+    }
+
+    return 0;
+}

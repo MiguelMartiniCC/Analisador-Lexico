@@ -3,6 +3,7 @@
 
 #include "lexer.h"
 #include "parser.h"
+#include "semantic.h"
 #include "symbol_table.h"
 
 int main(int argc, char *argv[])
@@ -27,6 +28,12 @@ int main(int argc, char *argv[])
      * de começar a análise léxica.
      */
     initSymbolTable();
+
+    /*
+     * Inicializa a tabela da análise semântica
+     * (separada da Tabela de Símbolos do lexer).
+     */
+    initSemantic();
 
     /*
      * Inicializa o Lexer com o arquivo fonte.
@@ -69,17 +76,27 @@ int main(int argc, char *argv[])
     fseek(file, 0, SEEK_SET);
     initLexer(&lexer, file);
 
-    printf("\n=== ANÁLISE SINTÁTICA ===\n");
+    printf("\n=== ANÁLISE SINTÁTICA E SEMÂNTICA ===\n");
 
     /*
      * Inicializa e executa o Parser.
+     * As verificações semânticas acontecem durante a análise sintática:
+     * o parser chama o analisador semântico a cada declaração, expressão
+     * e comando. Se houver erro (sintático ou semântico), o programa
+     * termina dentro de parse().
      */
 
     Parser parser;
     initParser(&parser, &lexer);
     parse(&parser);
 
+    /*
+     * Se chegou aqui, o programa está correto nas duas análises.
+     * Mostra a tabela semântica e a mensagem de sucesso.
+     */
+    finishSemanticAnalysis();
+
     fclose(file);
 
     return 0;
-}
+}
