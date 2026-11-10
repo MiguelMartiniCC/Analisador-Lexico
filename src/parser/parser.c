@@ -271,6 +271,7 @@ static void statementList(Parser *parser)
         parser->currentToken.type == TOKEN_IF ||
         parser->currentToken.type == TOKEN_WHILE ||
         parser->currentToken.type == TOKEN_RETURN ||
+        parser->currentToken.type == TOKEN_FUNC ||
         parser->currentToken.type == TOKEN_ID)
     {
         statement(parser);
