@@ -1,0 +1,9 @@
+// Aula 15, slide 5 (direita): while seguido de outro comando.
+main() {
+    int i, y;
+
+    while (i < 10) {
+        i = i + 1;
+    }
+    y = 10;
+}

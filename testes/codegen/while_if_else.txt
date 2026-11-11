@@ -1,0 +1,14 @@
+// Aula 14, slides 16 e 17: while com if/else dentro ("i++" vira "i = i + 1").
+main() {
+    int i, n, x, y, z;
+
+    i = 1;
+    while (i <= n) {
+        if (x > y) {
+            z = x + 10;
+        } else {
+            z = x + i;
+        }
+        i = i + 1;
+    }
+}

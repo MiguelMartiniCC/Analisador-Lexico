@@ -1,0 +1,11 @@
+// Aula 15, slide 5 (esquerda): if/else seguido de outro comando.
+main() {
+    int x, y, z;
+
+    if (y > z) {
+        x = y + z;
+    } else {
+        x = y + 10;
+    }
+    y = 10;
+}

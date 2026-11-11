@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include "parser.h"
 #include "semantic.h"
+#include "codegen.h"
 
 static void advance(Parser *parser)
 {
@@ -25,6 +26,26 @@ static void match(Parser *parser, TokenType expectedType)
     }
 }
 
+/*
+ * CODEGEN: atributos sintetizados de uma expressão.
+ * As funções de expressão devolvem os dois resultados juntos:
+ * 'type' para o analisador semântico (E.type) e 'code' para o
+ * gerador de código (E.addr, B.truelist, B.falselist).
+ */
+typedef struct
+{
+    SemType type;
+    Expr code;
+} Attr;
+
+static Attr makeAttr(SemType type, Expr code)
+{
+    Attr attr;
+    attr.type = type;
+    attr.code = code;
+    return attr;
+}
+
 static void program(Parser *parser);
 static void functionList(Parser *parser);
 static void functionDecl(Parser *parser);
@@ -35,42 +56,45 @@ static int dimension(Parser *parser);
 static void parameters(Parser *parser);
 static void parameterList(Parser *parser);
 static void mainFunction(Parser *parser);
-static void block(Parser *parser);
+static IntList block(Parser *parser);
 static void varList(Parser *parser);
 static void idList(Parser *parser, SemType varType);
-static void statementList(Parser *parser);
-static void statement(Parser *parser);
+static IntList statementList(Parser *parser, IntList pending);
+static IntList statement(Parser *parser);
 static void readStatement(Parser *parser);
 static void readTerm(Parser *parser);
 static void newReadTerm(Parser *parser);
-static int dimension2(Parser *parser);
+static int dimension2(Parser *parser, const char *arrayName, int level, Expr *offset);
+static Expr variableValue(const char *name, int indexCount, Expr offset);
 static void writeStatement(Parser *parser);
-static void writeTerm(Parser *parser);
-static void newWriteTerm(Parser *parser);
-static void ifStatement(Parser *parser);
-static void elseClause(Parser *parser);
-static void whileStatement(Parser *parser);
+static void writeTerm(Parser *parser, ArgList *terms);
+static void newWriteTerm(Parser *parser, ArgList *terms);
+static IntList ifStatement(Parser *parser);
+static IntList elseClause(Parser *parser, Expr condition, IntList thenNext);
+static IntList whileStatement(Parser *parser);
 static void assignmentStatement(Parser *parser);
-static SemType complement(Parser *parser);
-static SemType functionCall(Parser *parser);
-static int arguments(Parser *parser, const char *functionName);
-static int newArgument(Parser *parser, const char *functionName, int position);
+static SemType complement(Parser *parser, const char *target);
+static SemType functionCall(Parser *parser, const char *target);
+static int arguments(Parser *parser, const char *functionName, ArgList *args);
+static int newArgument(Parser *parser, const char *functionName, int position, ArgList *args);
+static void addArgumentValue(ArgList *args, Attr argument);
 static void returnStatement(Parser *parser);
-static SemType expression(Parser *parser);
-static SemType orExpr(Parser *parser);
-static SemType orExpr2(Parser *parser, SemType left);
-static SemType andExpr(Parser *parser);
-static SemType andExpr2(Parser *parser, SemType left);
-static SemType relationalExpr(Parser *parser);
-static SemType relationalExpr2(Parser *parser, SemType left);
-static SemType additiveExpr(Parser *parser);
-static SemType additiveExpr2(Parser *parser, SemType left);
+static Attr expression(Parser *parser);
+static Attr orExpr(Parser *parser);
+static Attr orExpr2(Parser *parser, Attr left);
+static Attr andExpr(Parser *parser);
+static Attr andExpr2(Parser *parser, Attr left);
+static Attr relationalExpr(Parser *parser);
+static Attr relationalExpr2(Parser *parser, Attr left);
+static Attr additiveExpr(Parser *parser);
+static Attr additiveExpr2(Parser *parser, Attr left);
 static void additiveOp(Parser *parser);
-static SemType multiplicativeExpr(Parser *parser);
-static SemType multiplicativeExpr2(Parser *parser, SemType left);
+static Attr multiplicativeExpr(Parser *parser);
+static Attr multiplicativeExpr2(Parser *parser, Attr left);
 static void multiplicativeOp(Parser *parser);
-static SemType factor(Parser *parser);
-static SemType term(Parser *parser);
+static Attr factor(Parser *parser);
+static Attr signedTerm(Parser *parser);
+static Attr term(Parser *parser);
 static int sign(Parser *parser);
 static SemType constant(Parser *parser);
 
@@ -108,12 +132,14 @@ static void functionDecl(Parser *parser)
     Token id = parser->currentToken;
     match(parser, TOKEN_ID);
     beginFunction(id.lexeme, functionType, id.line);
+    codegenBeginFunction(id.lexeme); // CODEGEN: rótulo "nome:" da função
 
     match(parser, TOKEN_OPEN_PAREN);
     parameters(parser);
     match(parser, TOKEN_CLOSE_PAREN);
-    block(parser);
+    IntList next = block(parser);
 
+    codegenEndFunction(next); // CODEGEN: backpatch da nextlist que sobrou + return implícito
     endFunction();
 }
 
@@ -132,6 +158,7 @@ static SemType returnType(Parser *parser)
 // TIPO → TIPOBASE DIMENSÃO
 static SemType type(Parser *parser)
 {
+    beginTypeDimensions(); // CODEGEN: as dimensões lidas a seguir são deste tipo
     BaseType base = baseType(parser);
     int dimensions = dimension(parser);
     return makeType(base, dimensions);
@@ -170,6 +197,7 @@ static int dimension(Parser *parser)
     if (parser->currentToken.type == TOKEN_OPEN_BRACKET)
     {
         match(parser, TOKEN_OPEN_BRACKET);
+        recordDimension(parser->currentToken.lexeme); // CODEGEN: tamanho desta dimensão
         match(parser, TOKEN_NUM_INT);
         match(parser, TOKEN_CLOSE_BRACKET);
         return 1 + dimension(parser);
@@ -189,6 +217,7 @@ static void parameters(Parser *parser)
         Token id = parser->currentToken;
         match(parser, TOKEN_ID);
         declareParameter(id.lexeme, paramType, id.line);
+        declareArrayDimensions(id.lexeme); // CODEGEN: guarda os tamanhos se for vetor
         parameterList(parser);
     }
 }
@@ -203,6 +232,7 @@ static void parameterList(Parser *parser)
         Token id = parser->currentToken;
         match(parser, TOKEN_ID);
         declareParameter(id.lexeme, paramType, id.line);
+        declareArrayDimensions(id.lexeme); // CODEGEN: guarda os tamanhos se for vetor
         parameterList(parser);
     }
 }
@@ -215,21 +245,25 @@ static void mainFunction(Parser *parser)
 
     // main devolve int (por isso "return 0;" é válido)
     beginFunction(mainToken.lexeme, makeType(TYPE_INT, 0), mainToken.line);
+    codegenBeginFunction(mainToken.lexeme); // CODEGEN: rótulo "main:"
 
     match(parser, TOKEN_OPEN_PAREN);
     match(parser, TOKEN_CLOSE_PAREN);
-    block(parser);
+    IntList next = block(parser);
 
+    codegenEndFunction(next); // CODEGEN: backpatch da nextlist que sobrou + return implícito
     endFunction();
 }
 
 // BLOCO → { LISTAVARIÁVEIS COMANDOS }
-static void block(Parser *parser)
+// SDT: S → { L }  { S.nextlist = L.nextlist; }   (declarações não geram código)
+static IntList block(Parser *parser)
 {
     match(parser, TOKEN_OPEN_BRACE);
     varList(parser);
-    statementList(parser);
+    IntList next = statementList(parser, emptylist()); // CODEGEN: L.nextlist
     match(parser, TOKEN_CLOSE_BRACE);
+    return next;
 }
 
 // LISTAVARIÁVEIS → TIPO id LISTAID ; LISTAVARIÁVEIS | ε
@@ -244,6 +278,7 @@ static void varList(Parser *parser)
         Token id = parser->currentToken;
         match(parser, TOKEN_ID);
         declareVariable(id.lexeme, varType, id.line);
+        declareArrayDimensions(id.lexeme); // CODEGEN: guarda os tamanhos se for vetor
         idList(parser, varType);
         match(parser, TOKEN_SEMICOLON);
         varList(parser);
@@ -259,28 +294,40 @@ static void idList(Parser *parser, SemType varType)
         Token id = parser->currentToken;
         match(parser, TOKEN_ID);
         declareVariable(id.lexeme, varType, id.line);
+        declareArrayDimensions(id.lexeme); // CODEGEN: guarda os tamanhos se for vetor
         idList(parser, varType);
     }
 }
 
 // COMANDOS → COMANDO COMANDOS | ε
-static void statementList(Parser *parser)
+// SDT: L → L1 M S  { backpatch(L1.nextlist, M.instr); L.nextlist = S.nextlist; }
+//      L → S       { L.nextlist = S.nextlist; }
+// 'pending' é a nextlist dos comandos já lidos (L1). Se vier outro comando,
+// ele começa em nextinstr (o M) e os desvios pendentes vão para lá.
+static IntList statementList(Parser *parser, IntList pending)
 {
     if (parser->currentToken.type == TOKEN_SCANF ||
         parser->currentToken.type == TOKEN_PRINTLN ||
         parser->currentToken.type == TOKEN_IF ||
         parser->currentToken.type == TOKEN_WHILE ||
         parser->currentToken.type == TOKEN_RETURN ||
+        parser->currentToken.type == TOKEN_FUNC ||
         parser->currentToken.type == TOKEN_ID)
     {
-        statement(parser);
-        statementList(parser);
+        backpatch(pending, nextinstr()); // CODEGEN: backpatch(L1.nextlist, M.instr)
+        IntList next = statement(parser);
+        return statementList(parser, next);
     }
+    return pending; // CODEGEN: sem mais comandos, a nextlist sobe para quem chamou
 }
 
 // COMANDO → LEITURA | ESCRITA | ATRIBUIÇÃO | FUNÇÃO | SELEÇÃO | ENQUANTO | RETORNO
-static void statement(Parser *parser)
+// Devolve a nextlist do comando. Só if e while deixam desvios pendentes;
+// os demais seguem para a próxima instrução (SDT: S → A ;  { S.nextlist = null; }).
+static IntList statement(Parser *parser)
 {
+    IntList next = emptylist();
+
     switch (parser->currentToken.type)
     {
     case TOKEN_SCANF:
@@ -290,13 +337,13 @@ static void statement(Parser *parser)
         writeStatement(parser);
         break;
     case TOKEN_IF:
-        ifStatement(parser);
+        next = ifStatement(parser); // CODEGEN: S.nextlist
         break;
     case TOKEN_FUNC:
-        functionCall(parser);
+        functionCall(parser, NULL); // CODEGEN: chamada sem destino ("call f, n")
         break;
     case TOKEN_WHILE:
-        whileStatement(parser);
+        next = whileStatement(parser); // CODEGEN: S.nextlist
         break;
     case TOKEN_RETURN:
         returnStatement(parser);
@@ -311,6 +358,8 @@ static void statement(Parser *parser)
                tokenTypeToString(parser->currentToken.type));
         exit(EXIT_FAILURE);
     }
+
+    return next;
 }
 
 // LEITURA → scanf ( TERMOLEITURA NOVOTERMOLEITURA) ;
@@ -325,13 +374,27 @@ static void readStatement(Parser *parser)
 }
 
 // TERMOLEITURA → id DIMENSAO2
+// Cada termo lido vira uma chamada sem argumentos: "id = call scanf, 0".
+// Num elemento de vetor: "t = call scanf, 0" e depois "v[i] = t".
 static void readTerm(Parser *parser)
 {
     Token id = parser->currentToken;
     match(parser, TOKEN_ID);
     SemType varType = requireVariable(id.lexeme, id.line);
-    int indexCount = dimension2(parser);
+    Expr offset = makeValue(""); // CODEGEN: preenchido por dimension2 se houver índice
+    int indexCount = dimension2(parser, id.lexeme, 0, &offset);
     indexedType(varType, indexCount, id.lexeme, id.line);
+
+    if (indexCount == 0)
+    {
+        emitCall("scanf", 0, id.lexeme); // CODEGEN: id = call scanf, 0
+        return;
+    }
+
+    char temp[ADDR_SIZE];
+    newTemp(temp);
+    emitCall("scanf", 0, temp);                                // CODEGEN: t = call scanf, 0
+    emitArrayWrite(id.lexeme, indexCount, offset, temp);       // CODEGEN: v[i] = t
 }
 
 // NOVOTERMOLEITURA → , TERMOLEITURA NOVOTERMOLEITURA | ε
@@ -347,43 +410,71 @@ static void newReadTerm(Parser *parser)
 
 // DIMENSAO2 → [ EXPR_ADITIVA ] DIMENSAO2 | ε
 // Confere que cada índice é int e devolve quantos índices foram usados.
-static int dimension2(Parser *parser)
+// CODEGEN: 'offset' acumula o índice linear de 'arrayName' (índice de
+// elemento, sem largura em bytes); 'level' é a posição do índice atual.
+static int dimension2(Parser *parser, const char *arrayName, int level, Expr *offset)
 {
     if (parser->currentToken.type == TOKEN_OPEN_BRACKET)
     {
         match(parser, TOKEN_OPEN_BRACKET);
         int line = parser->currentToken.line;
-        SemType index = additiveExpr(parser);
-        requireIntIndex(index, line);
+        Attr index = additiveExpr(parser);
+        requireIntIndex(index.type, line);
+        *offset = arrayOffset(arrayName, level, *offset, index.code); // CODEGEN: offset * tam + índice
         match(parser, TOKEN_CLOSE_BRACKET);
-        return 1 + dimension2(parser);
+        return 1 + dimension2(parser, arrayName, level + 1, offset);
     }
     return 0;
 }
 
+// CODEGEN: endereço de "id" ou, se houver índices, do elemento lido
+// num temporário ("t = v[i]", a instrução x = y[i] da aula).
+static Expr variableValue(const char *name, int indexCount, Expr offset)
+{
+    if (indexCount == 0)
+    {
+        return makeValue(name);
+    }
+    return emitArrayRead(name, indexCount, offset);
+}
+
 // ESCRITA → println ( TERMOESCRITA NOVOTERMOESCRITA ) ;
+// Tratado como chamada de procedimento: um "param" por termo e "call println, n".
 static void writeStatement(Parser *parser)
 {
+    ArgList terms;
+    initArgList(&terms); // CODEGEN: endereços dos termos, na ordem
+
     match(parser, TOKEN_PRINTLN);
     match(parser, TOKEN_OPEN_PAREN);
-    writeTerm(parser);
-    newWriteTerm(parser);
+    writeTerm(parser, &terms);
+    newWriteTerm(parser, &terms);
     match(parser, TOKEN_CLOSE_PAREN);
     match(parser, TOKEN_SEMICOLON);
+
+    emitParams(&terms);                          // CODEGEN: param x (um por termo)
+    emitCall("println", terms.count, NULL);      // CODEGEN: call println, n
 }
 
 // TERMOESCRITA → id DIMENSAO2 | CONSTANTE | texto
-static void writeTerm(Parser *parser)
+// Guarda em 'terms' o endereço do termo (o próprio id, número ou texto).
+static void writeTerm(Parser *parser, ArgList *terms)
 {
-    if (parser->currentToken.type == TOKEN_ID)
+    Token current = parser->currentToken;
+
+    if (current.type == TOKEN_ID)
     {
-        Token id = parser->currentToken;
         match(parser, TOKEN_ID);
-        SemType varType = requireVariable(id.lexeme, id.line);
-        int indexCount = dimension2(parser);
-        indexedType(varType, indexCount, id.lexeme, id.line);
+        SemType varType = requireVariable(current.lexeme, current.line);
+        Expr offset = makeValue(""); // CODEGEN: preenchido por dimension2 se houver índice
+        int indexCount = dimension2(parser, current.lexeme, 0, &offset);
+        indexedType(varType, indexCount, current.lexeme, current.line);
+        Expr value = variableValue(current.lexeme, indexCount, offset); // CODEGEN: id ou t = v[i]
+        addArgument(terms, value.addr);                                 // CODEGEN
+        return;
     }
-    else if (parser->currentToken.type == TOKEN_TEXT)
+
+    if (current.type == TOKEN_TEXT)
     {
         match(parser, TOKEN_TEXT);
     }
@@ -391,52 +482,83 @@ static void writeTerm(Parser *parser)
     {
         constant(parser);
     }
+
+    addArgument(terms, current.lexeme); // CODEGEN: o próprio texto ou número
 }
 
 // NOVOTERMOESCRITA → , TERMOESCRITA NOVOTERMOESCRITA | ε
-static void newWriteTerm(Parser *parser)
+static void newWriteTerm(Parser *parser, ArgList *terms)
 {
     if (parser->currentToken.type == TOKEN_COMMA)
     {
         match(parser, TOKEN_COMMA);
-        writeTerm(parser);
-        newWriteTerm(parser);
+        writeTerm(parser, terms);
+        newWriteTerm(parser, terms);
     }
 }
 
 // SELEÇÃO → if ( EXPRESSÃO ) BLOCO SENÃO
-static void ifStatement(Parser *parser)
+// SDT: S → if ( B ) M S1                 e
+//      S → if ( B ) M1 S1 N else M2 S2
+// As duas regras começam iguais; quem decide entre elas é elseClause().
+static IntList ifStatement(Parser *parser)
 {
     match(parser, TOKEN_IF);
     match(parser, TOKEN_OPEN_PAREN);
     int line = parser->currentToken.line;
-    SemType condition = expression(parser);
-    requireCondition(condition, "if", line);
+    Attr condition = expression(parser);
+    requireCondition(condition.type, "if", line);
+    Expr b = toCondition(condition.code); // CODEGEN: B em código de desvio
     match(parser, TOKEN_CLOSE_PAREN);
-    block(parser);
-    elseClause(parser);
+
+    int m1 = nextinstr();                   // CODEGEN: M1.instr
+    IntList s1 = block(parser);
+    backpatch(b.truelist, m1);              // CODEGEN: backpatch(B.truelist, M1.instr)
+    return elseClause(parser, b, s1);
 }
 
 // SENÃO → else BLOCO | ε
-static void elseClause(Parser *parser)
+// Com else:  backpatch(B.falselist, M2.instr);
+//            S.nextlist = merge(merge(S1.nextlist, N.nextlist), S2.nextlist)
+// Sem else:  S.nextlist = merge(B.falselist, S1.nextlist)
+static IntList elseClause(Parser *parser, Expr condition, IntList thenNext)
 {
     if (parser->currentToken.type == TOKEN_ELSE)
     {
+        IntList n = emitGotoPlaceholder();  // CODEGEN: N (o "then" pula o else)
         match(parser, TOKEN_ELSE);
-        block(parser);
+        int m2 = nextinstr();               // CODEGEN: M2.instr
+        IntList s2 = block(parser);
+        backpatch(condition.falselist, m2); // CODEGEN: backpatch(B.falselist, M2.instr)
+        IntList temp = merge(thenNext, n);  // CODEGEN: temp = merge(S1.nextlist, N.nextlist)
+        return merge(temp, s2);             // CODEGEN: S.nextlist = merge(temp, S2.nextlist)
     }
+
+    return merge(condition.falselist, thenNext); // CODEGEN: S.nextlist (sem else)
 }
 
 // ENQUANTO → while ( EXPRESSÃO ) BLOCO
-static void whileStatement(Parser *parser)
+// SDT: S → while M1 ( B ) M2 S1  { backpatch(S1.nextlist, M1.instr);
+//                                  backpatch(B.truelist, M2.instr);
+//                                  S.nextlist = B.falselist;
+//                                  emit('goto' M1.instr); }
+static IntList whileStatement(Parser *parser)
 {
     match(parser, TOKEN_WHILE);
+    int m1 = nextinstr();                   // CODEGEN: M1.instr (início do teste)
     match(parser, TOKEN_OPEN_PAREN);
     int line = parser->currentToken.line;
-    SemType condition = expression(parser);
-    requireCondition(condition, "while", line);
+    Attr condition = expression(parser);
+    requireCondition(condition.type, "while", line);
+    Expr b = toCondition(condition.code); // CODEGEN: B em código de desvio
     match(parser, TOKEN_CLOSE_PAREN);
-    block(parser);
+
+    int m2 = nextinstr();                   // CODEGEN: M2.instr (início do corpo)
+    IntList s1 = block(parser);
+    backpatch(s1, m1);                      // CODEGEN: backpatch(S1.nextlist, M1.instr)
+    backpatch(b.truelist, m2);              // CODEGEN: backpatch(B.truelist, M2.instr)
+    emitGoto(m1);                           // CODEGEN: emit('goto' M1.instr)
+    return b.falselist;                     // CODEGEN: S.nextlist = B.falselist
 }
 
 // ATRIBUIÇÃO → id = COMPLEMENTO ;
@@ -446,41 +568,63 @@ static void assignmentStatement(Parser *parser)
     match(parser, TOKEN_ID);
     SemType target = requireVariable(id.lexeme, id.line);
     match(parser, TOKEN_ATRIB);
-    SemType value = complement(parser);
+    SemType value = complement(parser, id.lexeme);
     checkAssignment(id.lexeme, target, value, id.line);
     match(parser, TOKEN_SEMICOLON);
 }
 
 // COMPLEMENTO → EXPRESSÃO | FUNÇÃO]
 // Devolve o tipo do valor: o retorno da função ou o tipo da expressão.
-static SemType complement(Parser *parser)
+// 'target' é o id que recebe o valor (o lado esquerdo da atribuição).
+// SDT: A → id = E   { emit(top.get(id.lexeme) '=' E.addr); }
+static SemType complement(Parser *parser, const char *target)
 {
     if (parser->currentToken.type == TOKEN_FUNC)
     {
-        return functionCall(parser);
+        return functionCall(parser, target); // CODEGEN: id = call f, n (direto, sem temporário)
     }
 
-    return expression(parser);
+    Attr value = expression(parser);
+    Expr result = toValue(value.code);     // CODEGEN: booleano (ex.: a < b) vira 0/1
+    emit("=", result.addr, NULL, target);  // CODEGEN: id = E.addr
+    return value.type;
 }
 
 // FUNÇÃO → func id ( ARGUMENTOS ) IMPORTANTE: ADICIONAR O FUNC NO TOKEN.H E NA LEITURA DO LEXER.
 // Devolve o tipo de retorno da função chamada.
-static SemType functionCall(Parser *parser)
+// 'target' recebe o resultado ("target = call f, n"); NULL quando a chamada
+// é um comando sozinho ("call f, n").
+// Todos os argumentos são avaliados antes do primeiro param, para que o
+// código de um argumento não fique no meio da sequência de params.
+static SemType functionCall(Parser *parser, const char *target)
 {
+    ArgList args;
+    initArgList(&args); // CODEGEN: endereços dos argumentos, na ordem
+
     match(parser, TOKEN_FUNC);
     Token id = parser->currentToken;
     match(parser, TOKEN_ID);
     SemType result = requireFunction(id.lexeme, id.line);
     match(parser, TOKEN_OPEN_PAREN);
-    int argumentCount = arguments(parser, id.lexeme);
+    int argumentCount = arguments(parser, id.lexeme, &args);
     match(parser, TOKEN_CLOSE_PAREN);
     checkArgumentCount(id.lexeme, argumentCount, id.line);
+
+    emitParams(&args);                             // CODEGEN: param x (um por argumento)
+    emitCall(id.lexeme, argumentCount, target);    // CODEGEN: [target =] call f, n
     return result;
+}
+
+// Avalia um argumento e guarda o endereço dele (booleano vira 0/1).
+static void addArgumentValue(ArgList *args, Attr argument)
+{
+    Expr value = toValue(argument.code); // CODEGEN: booleano (ex.: a < b) vira 0/1
+    addArgument(args, value.addr);       // CODEGEN: guarda o endereço para o param
 }
 
 // ARGUMENTOS → EXPRESSÃO NOVO_ARGUMENTO | ε
 // Confere o tipo de cada argumento e devolve quantos argumentos a chamada tem.
-static int arguments(Parser *parser, const char *functionName)
+static int arguments(Parser *parser, const char *functionName, ArgList *args)
 {
     if (parser->currentToken.type == TOKEN_SUM ||
         parser->currentToken.type == TOKEN_SUB ||
@@ -492,126 +636,158 @@ static int arguments(Parser *parser, const char *functionName)
         parser->currentToken.type == TOKEN_TEXT)
     {
         int line = parser->currentToken.line;
-        SemType argument = expression(parser);
-        checkArgument(functionName, 0, argument, line);
-        return 1 + newArgument(parser, functionName, 1);
+        Attr argument = expression(parser);
+        checkArgument(functionName, 0, argument.type, line);
+        addArgumentValue(args, argument); // CODEGEN
+        return 1 + newArgument(parser, functionName, 1, args);
     }
     return 0;
 }
 
 // NOVO_ARGUMENTO → , EXPRESSÃO NOVO_ARGUMENTO | ε
 // 'position' é a posição (a partir de 0) do próximo argumento.
-static int newArgument(Parser *parser, const char *functionName, int position)
+static int newArgument(Parser *parser, const char *functionName, int position, ArgList *args)
 {
     if (parser->currentToken.type == TOKEN_COMMA)
     {
         match(parser, TOKEN_COMMA);
         int line = parser->currentToken.line;
-        SemType argument = expression(parser);
-        checkArgument(functionName, position, argument, line);
-        return 1 + newArgument(parser, functionName, position + 1);
+        Attr argument = expression(parser);
+        checkArgument(functionName, position, argument.type, line);
+        addArgumentValue(args, argument); // CODEGEN
+        return 1 + newArgument(parser, functionName, position + 1, args);
     }
     return 0;
 }
 
 // RETORNO → return EXPRESSÃO ;
+// Gera "return y", com y = endereço da expressão (booleano vira 0/1).
 static void returnStatement(Parser *parser)
 {
     Token returnToken = parser->currentToken;
     match(parser, TOKEN_RETURN);
-    SemType value = expression(parser);
-    checkReturn(value, returnToken.line);
+    Attr value = expression(parser);
+    checkReturn(value.type, returnToken.line);
+    Expr result = toValue(value.code);            // CODEGEN: booleano vira 0/1
+    emit("return", result.addr, NULL, NULL);      // CODEGEN: return y
     match(parser, TOKEN_SEMICOLON);
 }
 
 // EXPRESSÃO → EXPR_OU
-// As funções de expressão devolvem o tipo do que reconheceram.
-static SemType expression(Parser *parser)
+// As funções de expressão devolvem o tipo (semântico) e o código (gerador).
+static Attr expression(Parser *parser)
 {
     return orExpr(parser);
 }
 
 // EXPR_OU → EXPR_E EXPR_OU2
-static SemType orExpr(Parser *parser)
+static Attr orExpr(Parser *parser)
 {
-    SemType left = andExpr(parser);
+    Attr left = andExpr(parser);
     return orExpr2(parser, left);
 }
 
 // EXPR_OU2 → || EXPR_E EXPR_OU2 | ε
-// 'left' é o tipo do que já foi lido à esquerda do operador.
-static SemType orExpr2(Parser *parser, SemType left)
+// 'left' é o que já foi lido à esquerda do operador.
+// SDT: B → B1 || M B2  { backpatch(B1.falselist, M.instr);
+//                        B.truelist = merge(B1.truelist, B2.truelist);
+//                        B.falselist = B2.falselist; }
+static Attr orExpr2(Parser *parser, Attr left)
 {
     if (parser->currentToken.type == TOKEN_OR)
     {
         Token op = parser->currentToken;
         match(parser, TOKEN_OR);
-        SemType right = andExpr(parser);
-        SemType result = logicalType(left, right, op.lexeme, op.line);
-        return orExpr2(parser, result);
+        Expr b1 = toCondition(left.code);   // CODEGEN: B1 em código de desvio
+        int m = nextinstr();                // CODEGEN: M.instr (início de B2)
+        Attr right = andExpr(parser);
+        Expr b2 = toCondition(right.code);  // CODEGEN: B2 em código de desvio
+        SemType result = logicalType(left.type, right.type, op.lexeme, op.line);
+
+        backpatch(b1.falselist, m);         // CODEGEN: B1 falso -> testa B2
+        Expr b = makeBool(merge(b1.truelist, b2.truelist), b2.falselist); // CODEGEN
+        return orExpr2(parser, makeAttr(result, b));
     }
     return left;
 }
 
 // EXPR_E → EXPR_RELACIONAL EXPR_E2
-static SemType andExpr(Parser *parser)
+static Attr andExpr(Parser *parser)
 {
-    SemType left = relationalExpr(parser);
+    Attr left = relationalExpr(parser);
     return andExpr2(parser, left);
 }
 
 // EXPR_E2 → && EXPR_RELACIONAL EXPR_E2 | ε
-static SemType andExpr2(Parser *parser, SemType left)
+// SDT: B → B1 && M B2  { backpatch(B1.truelist, M.instr);
+//                        B.truelist = B2.truelist;
+//                        B.falselist = merge(B1.falselist, B2.falselist); }
+static Attr andExpr2(Parser *parser, Attr left)
 {
     if (parser->currentToken.type == TOKEN_AND)
     {
         Token op = parser->currentToken;
         match(parser, TOKEN_AND);
-        SemType right = relationalExpr(parser);
-        SemType result = logicalType(left, right, op.lexeme, op.line);
-        return andExpr2(parser, result);
+        Expr b1 = toCondition(left.code);   // CODEGEN: B1 em código de desvio
+        int m = nextinstr();                // CODEGEN: M.instr (início de B2)
+        Attr right = relationalExpr(parser);
+        Expr b2 = toCondition(right.code);  // CODEGEN: B2 em código de desvio
+        SemType result = logicalType(left.type, right.type, op.lexeme, op.line);
+
+        backpatch(b1.truelist, m);          // CODEGEN: B1 verdadeiro -> testa B2
+        Expr b = makeBool(b2.truelist, merge(b1.falselist, b2.falselist)); // CODEGEN
+        return andExpr2(parser, makeAttr(result, b));
     }
     return left;
 }
 
 // EXPR_RELACIONAL → EXPR_ADITIVA EXPR_ RELACIONAL2
-static SemType relationalExpr(Parser *parser)
+static Attr relationalExpr(Parser *parser)
 {
-    SemType left = additiveExpr(parser);
+    Attr left = additiveExpr(parser);
     return relationalExpr2(parser, left);
 }
 
 // EXPR_RELACIONAL2 → comp EXPR_ADITIVA | ε
-static SemType relationalExpr2(Parser *parser, SemType left)
+// SDT: B → E1 rel E2  { B.truelist = makelist(nextinstr);
+//                       B.falselist = makelist(nextinstr + 1);
+//                       emit('if' E1.addr rel.op E2.addr 'goto _');
+//                       emit('goto _'); }
+static Attr relationalExpr2(Parser *parser, Attr left)
 {
     if (parser->currentToken.type == TOKEN_COMP)
     {
         Token op = parser->currentToken;
         match(parser, TOKEN_COMP);
-        SemType right = additiveExpr(parser);
-        return comparisonType(left, right, op.lexeme, op.line);
+        Attr right = additiveExpr(parser);
+        SemType result = comparisonType(left.type, right.type, op.lexeme, op.line);
+        Expr b = emitRelational(op.lexeme, left.code, right.code); // CODEGEN: if E1 rel E2 goto _ / goto _
+        return makeAttr(result, b);
     }
     return left;
 }
 
 // EXPR_ADITIVA → EXPR_MULTIPLICATIVA EXPR_ADITIVA2
-static SemType additiveExpr(Parser *parser)
+static Attr additiveExpr(Parser *parser)
 {
-    SemType left = multiplicativeExpr(parser);
+    Attr left = multiplicativeExpr(parser);
     return additiveExpr2(parser, left);
 }
 
 // EXPR_ADITIVA2 → OP_ADITIVO EXPR_MULTIPLICATIVA EXPR_ADITIVA2 | ε
-static SemType additiveExpr2(Parser *parser, SemType left)
+// SDT: E → E1 + E2  { E.addr = new Temp(); emit(E.addr '=' E1.addr '+' E2.addr); }  (idem para -)
+// 'left' faz o papel de E1: assim a - b - c vira (a - b) - c (associatividade à esquerda).
+static Attr additiveExpr2(Parser *parser, Attr left)
 {
     if (parser->currentToken.type == TOKEN_SUM ||
         parser->currentToken.type == TOKEN_SUB)
     {
         Token op = parser->currentToken;
         additiveOp(parser);
-        SemType right = multiplicativeExpr(parser);
-        SemType result = arithmeticType(left, right, op.lexeme, op.line);
-        return additiveExpr2(parser, result);
+        Attr right = multiplicativeExpr(parser);
+        SemType result = arithmeticType(left.type, right.type, op.lexeme, op.line);
+        Expr code = emitBinaryOp(op.lexeme, left.code, right.code); // CODEGEN: t = E1 op E2
+        return additiveExpr2(parser, makeAttr(result, code));
     }
     return left;
 }
@@ -637,14 +813,15 @@ static void additiveOp(Parser *parser)
 }
 
 // EXPR_MULTIPLICATIVA → FATOR EXPR_MULTIPLICATIVA2
-static SemType multiplicativeExpr(Parser *parser)
+static Attr multiplicativeExpr(Parser *parser)
 {
-    SemType left = factor(parser);
+    Attr left = factor(parser);
     return multiplicativeExpr2(parser, left);
 }
 
 // EXPR_MULTIPLICATIVA2 → OP_MULTIPLICATIVO FATOR EXPR_MULTIPLICATIVA2 | ε
-static SemType multiplicativeExpr2(Parser *parser, SemType left)
+// SDT: mesmo padrão de E → E1 + E2, com * / %.
+static Attr multiplicativeExpr2(Parser *parser, Attr left)
 {
     if (parser->currentToken.type == TOKEN_MULT ||
         parser->currentToken.type == TOKEN_DIV ||
@@ -652,9 +829,10 @@ static SemType multiplicativeExpr2(Parser *parser, SemType left)
     {
         Token op = parser->currentToken;
         multiplicativeOp(parser);
-        SemType right = factor(parser);
-        SemType result = arithmeticType(left, right, op.lexeme, op.line);
-        return multiplicativeExpr2(parser, result);
+        Attr right = factor(parser);
+        SemType result = arithmeticType(left.type, right.type, op.lexeme, op.line);
+        Expr code = emitBinaryOp(op.lexeme, left.code, right.code); // CODEGEN: t = E1 op E2
+        return multiplicativeExpr2(parser, makeAttr(result, code));
     }
     return left;
 }
@@ -683,54 +861,82 @@ static void multiplicativeOp(Parser *parser)
 }
 
 // FATOR → SINAL TERMO | texto | ! FATOR | ( EXPRESSÃO )
-static SemType factor(Parser *parser)
+static Attr factor(Parser *parser)
 {
     switch (parser->currentToken.type)
     {
     case TOKEN_TEXT:
+    {
+        Token text = parser->currentToken;
         match(parser, TOKEN_TEXT);
-        return makeType(TYPE_TEXT, 0);
+        // CODEGEN: a constante texto é o próprio endereço (com as aspas)
+        return makeAttr(makeType(TYPE_TEXT, 0), makeValue(text.lexeme));
+    }
     case TOKEN_NOT:
     {
+        // SDT: B → ! B1  { B.truelist = B1.falselist; B.falselist = B1.truelist; }
+        // Não emite nada além do que B1 já emitiu: só troca as listas.
         Token op = parser->currentToken;
         match(parser, TOKEN_NOT);
-        SemType operand = factor(parser);
-        return notType(operand, op.line);
+        Attr operand = factor(parser);
+        Expr b1 = toCondition(operand.code);           // CODEGEN: B1 em código de desvio
+        Expr b = makeBool(b1.falselist, b1.truelist);  // CODEGEN: troca truelist e falselist
+        return makeAttr(notType(operand.type, op.line), b);
     }
     case TOKEN_OPEN_PAREN:
     {
+        // SDT: E → ( E1 )  { E.addr = E1.addr; }  — não emite nada
         match(parser, TOKEN_OPEN_PAREN);
-        SemType inner = expression(parser);
+        Attr inner = expression(parser);
         match(parser, TOKEN_CLOSE_PAREN);
         return inner;
     }
     default:
-    {
-        Token signToken = parser->currentToken;
-        int hasSign = sign(parser);
-        SemType value = term(parser);
-        if (hasSign)
-        {
-            return signType(value, signToken.lexeme, signToken.line);
-        }
-        return value;
-    }
+        return signedTerm(parser);
     }
 }
 
-// TERMO → id DIMENSAO2 | CONSTANTE
-static SemType term(Parser *parser)
+// SINAL TERMO (o caso padrão de FATOR).
+// SDT: E → - E1  { E.addr = new Temp(); emit(E.addr '=' 'minus' E1.addr); }
+// O + unário não muda o valor, então não gera instrução.
+static Attr signedTerm(Parser *parser)
 {
-    if (parser->currentToken.type == TOKEN_ID)
+    Token signToken = parser->currentToken;
+    int hasSign = sign(parser);
+    Attr value = term(parser);
+
+    if (!hasSign)
     {
-        Token id = parser->currentToken;
-        match(parser, TOKEN_ID);
-        SemType varType = requireVariable(id.lexeme, id.line);
-        int indexCount = dimension2(parser);
-        return indexedType(varType, indexCount, id.lexeme, id.line);
+        return value;
     }
 
-    return constant(parser);
+    SemType result = signType(value.type, signToken.lexeme, signToken.line);
+    if (signToken.type == TOKEN_SUB)
+    {
+        return makeAttr(result, emitUnaryMinus(value.code)); // CODEGEN: t = minus E1
+    }
+    return makeAttr(result, value.code);
+}
+
+// TERMO → id DIMENSAO2 | CONSTANTE
+// SDT: E → id  { E.addr = top.get(id.lexeme); }   E → num  { E.addr = num.lexeme; }
+static Attr term(Parser *parser)
+{
+    Token current = parser->currentToken;
+
+    if (current.type == TOKEN_ID)
+    {
+        match(parser, TOKEN_ID);
+        SemType varType = requireVariable(current.lexeme, current.line);
+        Expr offset = makeValue(""); // CODEGEN: preenchido por dimension2 se houver índice
+        int indexCount = dimension2(parser, current.lexeme, 0, &offset);
+        SemType result = indexedType(varType, indexCount, current.lexeme, current.line);
+        Expr value = variableValue(current.lexeme, indexCount, offset); // CODEGEN: E.addr = id ou t = v[i]
+        return makeAttr(result, value);
+    }
+
+    SemType constType = constant(parser);
+    return makeAttr(constType, makeValue(current.lexeme)); // CODEGEN: E.addr = num
 }
 
 // SINAL → + | - | ε

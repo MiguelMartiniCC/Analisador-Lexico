@@ -1,0 +1,10 @@
+// Aula 14, slide 11: comando SE com senão.
+main() {
+    int x, y, a;
+
+    if (x > y) {
+        a = x + y;
+    } else {
+        a = x - y;
+    }
+}

@@ -1,0 +1,13 @@
+// Booleano usado como valor: materializado em 0/1 na atribuição.
+main() {
+    int x, y;
+    boolean ok, r;
+
+    ok = x < y;
+    r = ok && x != 0;
+    ok = !ok;
+    r = ok;
+    if (ok || r) {
+        x = 1;
+    }
+}

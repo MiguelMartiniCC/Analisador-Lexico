@@ -1,0 +1,9 @@
+// Aula 14, slides 8 e 22: expressões aritméticas e atribuição.
+main() {
+    int x, a, b, c, d;
+
+    x = a + b * (10 + c);
+    a = b + c;
+    a = b + -c;
+    a = (b + c) + -d;
+}

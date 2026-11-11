@@ -1,0 +1,3 @@
+// Função sem comandos: só o return implícito.
+main() {
+}

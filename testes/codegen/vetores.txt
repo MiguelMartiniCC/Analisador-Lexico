@@ -1,0 +1,18 @@
+// Vetores: leitura de v[i] (instrução x = y[i]), índice linear de matriz
+// (m[i][j] com int[3][4] m vira i * 4 + j), scanf em elemento e vetor inteiro como argumento.
+int soma(int[3] v) {
+    return v[0] + v[1] + v[2];
+}
+
+main() {
+    int[3] v;
+    int[3][4] m;
+    int i, j, x;
+
+    x = v[i];
+    x = m[i][j];
+    x = v[i + 1] * 2;
+    scanf(v[2], m[1][j], x);
+    println(v[0], m[i][1]);
+    x = func soma(v);
+}

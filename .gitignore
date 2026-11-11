@@ -1,2 +1,6 @@
 compiler.exe
 /generated-artifacts/
+
+# Código intermediário gerado (os gabaritos *.esperado.tac são versionados)
+*.tac
+!*.esperado.tac

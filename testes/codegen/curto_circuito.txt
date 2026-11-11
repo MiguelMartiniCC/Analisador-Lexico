@@ -1,0 +1,8 @@
+// Aula 14, slide 13: curto-circuito (gabarito derivado do SDT, não do slide).
+main() {
+    int x, y;
+
+    if (x < 100 || x > 200 && x != y) {
+        x = 0;
+    }
+}

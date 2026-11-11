@@ -1,0 +1,9 @@
+// Leitura e escrita: um "x = call scanf, 0" por termo; println com param por termo.
+main() {
+    int idade;
+    float pi;
+
+    scanf(idade, pi);
+    println("Idade:", idade, 10, 2.5);
+    println(pi);
+}
