@@ -27,18 +27,22 @@ static void match(Parser *parser, TokenType expectedType)
 }
 
 /*
- * Atributos sintetizados de uma expressão (o que a função de cada
- * não-terminal devolve). 'type' é usado pelo analisador semântico (E.type).
+ * CODEGEN: atributos sintetizados de uma expressão.
+ * As funções de expressão devolvem os dois resultados juntos:
+ * 'type' para o analisador semântico (E.type) e 'code' para o
+ * gerador de código (E.addr, B.truelist, B.falselist).
  */
 typedef struct
 {
     SemType type;
+    Expr code;
 } Attr;
 
-static Attr makeAttr(SemType type)
+static Attr makeAttr(SemType type, Expr code)
 {
     Attr attr;
     attr.type = type;
+    attr.code = code;
     return attr;
 }
 
@@ -68,7 +72,7 @@ static void ifStatement(Parser *parser);
 static void elseClause(Parser *parser);
 static void whileStatement(Parser *parser);
 static void assignmentStatement(Parser *parser);
-static SemType complement(Parser *parser);
+static SemType complement(Parser *parser, const char *target);
 static SemType functionCall(Parser *parser);
 static int arguments(Parser *parser, const char *functionName);
 static int newArgument(Parser *parser, const char *functionName, int position);
@@ -469,21 +473,25 @@ static void assignmentStatement(Parser *parser)
     match(parser, TOKEN_ID);
     SemType target = requireVariable(id.lexeme, id.line);
     match(parser, TOKEN_ATRIB);
-    SemType value = complement(parser);
+    SemType value = complement(parser, id.lexeme);
     checkAssignment(id.lexeme, target, value, id.line);
     match(parser, TOKEN_SEMICOLON);
 }
 
 // COMPLEMENTO → EXPRESSÃO | FUNÇÃO]
 // Devolve o tipo do valor: o retorno da função ou o tipo da expressão.
-static SemType complement(Parser *parser)
+// 'target' é o id que recebe o valor (o lado esquerdo da atribuição).
+// SDT: A → id = E   { emit(top.get(id.lexeme) '=' E.addr); }
+static SemType complement(Parser *parser, const char *target)
 {
     if (parser->currentToken.type == TOKEN_FUNC)
     {
         return functionCall(parser);
     }
 
-    return expression(parser).type;
+    Attr value = expression(parser);
+    emit("=", value.code.addr, NULL, target); // CODEGEN: id = E.addr
+    return value.type;
 }
 
 // FUNÇÃO → func id ( ARGUMENTOS ) IMPORTANTE: ADICIONAR O FUNC NO TOKEN.H E NA LEITURA DO LEXER.
@@ -571,7 +579,7 @@ static Attr orExpr2(Parser *parser, Attr left)
         match(parser, TOKEN_OR);
         Attr right = andExpr(parser);
         SemType result = logicalType(left.type, right.type, op.lexeme, op.line);
-        return orExpr2(parser, makeAttr(result));
+        return orExpr2(parser, makeAttr(result, left.code));
     }
     return left;
 }
@@ -592,7 +600,7 @@ static Attr andExpr2(Parser *parser, Attr left)
         match(parser, TOKEN_AND);
         Attr right = relationalExpr(parser);
         SemType result = logicalType(left.type, right.type, op.lexeme, op.line);
-        return andExpr2(parser, makeAttr(result));
+        return andExpr2(parser, makeAttr(result, left.code));
     }
     return left;
 }
@@ -613,7 +621,7 @@ static Attr relationalExpr2(Parser *parser, Attr left)
         match(parser, TOKEN_COMP);
         Attr right = additiveExpr(parser);
         SemType result = comparisonType(left.type, right.type, op.lexeme, op.line);
-        return makeAttr(result);
+        return makeAttr(result, left.code);
     }
     return left;
 }
@@ -626,6 +634,8 @@ static Attr additiveExpr(Parser *parser)
 }
 
 // EXPR_ADITIVA2 → OP_ADITIVO EXPR_MULTIPLICATIVA EXPR_ADITIVA2 | ε
+// SDT: E → E1 + E2  { E.addr = new Temp(); emit(E.addr '=' E1.addr '+' E2.addr); }  (idem para -)
+// 'left' faz o papel de E1: assim a - b - c vira (a - b) - c (associatividade à esquerda).
 static Attr additiveExpr2(Parser *parser, Attr left)
 {
     if (parser->currentToken.type == TOKEN_SUM ||
@@ -635,7 +645,8 @@ static Attr additiveExpr2(Parser *parser, Attr left)
         additiveOp(parser);
         Attr right = multiplicativeExpr(parser);
         SemType result = arithmeticType(left.type, right.type, op.lexeme, op.line);
-        return additiveExpr2(parser, makeAttr(result));
+        Expr code = emitBinaryOp(op.lexeme, left.code, right.code); // CODEGEN: t = E1 op E2
+        return additiveExpr2(parser, makeAttr(result, code));
     }
     return left;
 }
@@ -668,6 +679,7 @@ static Attr multiplicativeExpr(Parser *parser)
 }
 
 // EXPR_MULTIPLICATIVA2 → OP_MULTIPLICATIVO FATOR EXPR_MULTIPLICATIVA2 | ε
+// SDT: mesmo padrão de E → E1 + E2, com * / %.
 static Attr multiplicativeExpr2(Parser *parser, Attr left)
 {
     if (parser->currentToken.type == TOKEN_MULT ||
@@ -678,7 +690,8 @@ static Attr multiplicativeExpr2(Parser *parser, Attr left)
         multiplicativeOp(parser);
         Attr right = factor(parser);
         SemType result = arithmeticType(left.type, right.type, op.lexeme, op.line);
-        return multiplicativeExpr2(parser, makeAttr(result));
+        Expr code = emitBinaryOp(op.lexeme, left.code, right.code); // CODEGEN: t = E1 op E2
+        return multiplicativeExpr2(parser, makeAttr(result, code));
     }
     return left;
 }
@@ -712,17 +725,22 @@ static Attr factor(Parser *parser)
     switch (parser->currentToken.type)
     {
     case TOKEN_TEXT:
+    {
+        Token text = parser->currentToken;
         match(parser, TOKEN_TEXT);
-        return makeAttr(makeType(TYPE_TEXT, 0));
+        // CODEGEN: a constante texto é o próprio endereço (com as aspas)
+        return makeAttr(makeType(TYPE_TEXT, 0), makeValue(text.lexeme));
+    }
     case TOKEN_NOT:
     {
         Token op = parser->currentToken;
         match(parser, TOKEN_NOT);
         Attr operand = factor(parser);
-        return makeAttr(notType(operand.type, op.line));
+        return makeAttr(notType(operand.type, op.line), operand.code);
     }
     case TOKEN_OPEN_PAREN:
     {
+        // SDT: E → ( E1 )  { E.addr = E1.addr; }  — não emite nada
         match(parser, TOKEN_OPEN_PAREN);
         Attr inner = expression(parser);
         match(parser, TOKEN_CLOSE_PAREN);
@@ -734,6 +752,8 @@ static Attr factor(Parser *parser)
 }
 
 // SINAL TERMO (o caso padrão de FATOR).
+// SDT: E → - E1  { E.addr = new Temp(); emit(E.addr '=' 'minus' E1.addr); }
+// O + unário não muda o valor, então não gera instrução.
 static Attr signedTerm(Parser *parser)
 {
     Token signToken = parser->currentToken;
@@ -745,10 +765,16 @@ static Attr signedTerm(Parser *parser)
         return value;
     }
 
-    return makeAttr(signType(value.type, signToken.lexeme, signToken.line));
+    SemType result = signType(value.type, signToken.lexeme, signToken.line);
+    if (signToken.type == TOKEN_SUB)
+    {
+        return makeAttr(result, emitUnaryMinus(value.code)); // CODEGEN: t = minus E1
+    }
+    return makeAttr(result, value.code);
 }
 
 // TERMO → id DIMENSAO2 | CONSTANTE
+// SDT: E → id  { E.addr = top.get(id.lexeme); }   E → num  { E.addr = num.lexeme; }
 static Attr term(Parser *parser)
 {
     Token current = parser->currentToken;
@@ -759,11 +785,11 @@ static Attr term(Parser *parser)
         SemType varType = requireVariable(current.lexeme, current.line);
         int indexCount = dimension2(parser);
         SemType result = indexedType(varType, indexCount, current.lexeme, current.line);
-        return makeAttr(result);
+        return makeAttr(result, makeValue(current.lexeme)); // CODEGEN: E.addr = id
     }
 
     SemType constType = constant(parser);
-    return makeAttr(constType);
+    return makeAttr(constType, makeValue(current.lexeme)); // CODEGEN: E.addr = num
 }
 
 // SINAL → + | - | ε

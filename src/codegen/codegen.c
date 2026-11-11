@@ -122,6 +122,36 @@ void backpatch(IntList list, int target)
 }
 
 // ---------------------------------------------------------------------
+// Expressões
+// ---------------------------------------------------------------------
+
+Expr makeValue(const char *addr)
+{
+    Expr expr;
+    expr.is_bool = 0;
+    copyField(expr.addr, ADDR_SIZE, addr);
+    expr.truelist = emptylist();
+    expr.falselist = emptylist();
+    return expr;
+}
+
+Expr emitBinaryOp(const char *op, Expr left, Expr right)
+{
+    char temp[ADDR_SIZE];
+    newTemp(temp);
+    emit(op, left.addr, right.addr, temp);
+    return makeValue(temp);
+}
+
+Expr emitUnaryMinus(Expr operand)
+{
+    char temp[ADDR_SIZE];
+    newTemp(temp);
+    emit("minus", operand.addr, NULL, temp);
+    return makeValue(temp);
+}
+
+// ---------------------------------------------------------------------
 // Funções do programa
 // ---------------------------------------------------------------------
 

@@ -44,6 +44,21 @@ typedef struct
     int count;
 } IntList;
 
+/*
+ * Resultado da tradução de uma expressão (atributos do SDT).
+ * - Valor (is_bool = 0): o resultado está no endereço addr (E.addr),
+ *   que pode ser um nome, uma constante ou um temporário.
+ * - Booleano em código de desvio (is_bool = 1): não há endereço; o
+ *   resultado são os desvios em truelist e falselist (B.truelist, B.falselist).
+ */
+typedef struct
+{
+    int is_bool;
+    char addr[ADDR_SIZE];
+    IntList truelist;
+    IntList falselist;
+} Expr;
+
 // ---- Funções do SDT (mesmos nomes da aula) ----
 
 // Número que a PRÓXIMA instrução emitida vai receber (começa em 1).
@@ -66,6 +81,18 @@ IntList merge(IntList first, IntList second);
 
 // Faz todos os desvios de 'list' apontarem para a instrução 'target'.
 void backpatch(IntList list, int target);
+
+// ---- Expressões ----
+
+// Expressão cujo valor já está em 'addr' (E → id, E → num): não emite nada.
+Expr makeValue(const char *addr);
+
+// E → E1 op E2: E.addr = new Temp(); emit(E.addr '=' E1.addr op E2.addr).
+// Vale para + - * / %.
+Expr emitBinaryOp(const char *op, Expr left, Expr right);
+
+// E → - E1: E.addr = new Temp(); emit(E.addr '=' 'minus' E1.addr).
+Expr emitUnaryMinus(Expr operand);
 
 // ---- Funções do programa ----
 

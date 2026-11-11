@@ -1,0 +1,12 @@
+// Associatividade à esquerda, precedência, sinais e constante decimal.
+main() {
+    int a, b, c, d, e;
+    float f;
+
+    a = b - c - d;
+    a = b * c / d % e;
+    a = +b;
+    a = -5;
+    f = a + 1.5;
+    a = b + c * d - e;
+}
