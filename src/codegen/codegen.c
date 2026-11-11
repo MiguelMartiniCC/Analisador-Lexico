@@ -22,6 +22,21 @@ static int tempCount = 0;
 static FunctionLabel labels[MAX_FUNCTIONS];
 static int labelCount = 0;
 
+// Vetor declarado na função atual: nome e tamanho de cada dimensão.
+typedef struct
+{
+    char name[ADDR_SIZE];
+    char sizes[MAX_DIMS][ADDR_SIZE];
+    int count;
+} ArrayInfo;
+
+static ArrayInfo arrays[MAX_ARRAYS];
+static int arrayCount = 0;
+
+// Dimensões do TIPO que está sendo lido agora (ex.: [3][4] em "int[3][4] m").
+static char pendingSizes[MAX_DIMS][ADDR_SIZE];
+static int pendingCount = 0;
+
 // ---------------------------------------------------------------------
 // Erros internos
 // ---------------------------------------------------------------------
@@ -271,6 +286,103 @@ void emitCall(const char *function, int argCount, const char *target)
 }
 
 // ---------------------------------------------------------------------
+// Vetores
+// ---------------------------------------------------------------------
+
+void beginTypeDimensions(void)
+{
+    pendingCount = 0;
+}
+
+void recordDimension(const char *size)
+{
+    if (pendingCount >= MAX_DIMS)
+    {
+        codegenFatal("vetor com dimensões demais (limite MAX_DIMS).");
+    }
+    copyField(pendingSizes[pendingCount], ADDR_SIZE, size);
+    pendingCount++;
+}
+
+void declareArrayDimensions(const char *name)
+{
+    if (pendingCount == 0)
+    {
+        return; // não é vetor
+    }
+    if (arrayCount >= MAX_ARRAYS)
+    {
+        codegenFatal("vetores demais numa função (limite MAX_ARRAYS).");
+    }
+
+    ArrayInfo *info = &arrays[arrayCount];
+    copyField(info->name, ADDR_SIZE, name);
+    for (int i = 0; i < pendingCount; i++)
+    {
+        copyField(info->sizes[i], ADDR_SIZE, pendingSizes[i]);
+    }
+    info->count = pendingCount;
+    arrayCount++;
+}
+
+// Busca as dimensões de 'name'. O semântico já garantiu que é vetor e que
+// não há índices demais; aqui só tratamos o que o gerador não suporta.
+static const ArrayInfo *findArray(const char *name)
+{
+    for (int i = 0; i < arrayCount; i++)
+    {
+        if (strcmp(arrays[i].name, name) == 0)
+        {
+            return &arrays[i];
+        }
+    }
+    codegenFatal("vetor sem dimensões registradas.");
+    return NULL;
+}
+
+// Com menos índices que dimensões (ex.: m[1] de uma matriz) o resultado
+// seria uma linha inteira, que não cabe numa instrução x = y[i].
+static void requireAllIndexes(const char *name, int indexCount)
+{
+    if (indexCount != findArray(name)->count)
+    {
+        codegenFatal("acesso a vetor com menos índices que dimensões não é suportado.");
+    }
+}
+
+Expr arrayOffset(const char *name, int level, Expr offset, Expr index)
+{
+    if (level == 0)
+    {
+        return index;
+    }
+
+    // offset * tamanho_da_dimensão + índice  (ordem linha a linha)
+    char scaled[ADDR_SIZE];
+    char result[ADDR_SIZE];
+    newTemp(scaled);
+    emit("*", offset.addr, findArray(name)->sizes[level], scaled);
+    newTemp(result);
+    emit("+", scaled, index.addr, result);
+    return makeValue(result);
+}
+
+Expr emitArrayRead(const char *name, int indexCount, Expr offset)
+{
+    requireAllIndexes(name, indexCount);
+    char temp[ADDR_SIZE];
+    newTemp(temp);
+    emit("=[]", name, offset.addr, temp);
+    return makeValue(temp);
+}
+
+void emitArrayWrite(const char *name, int indexCount, Expr offset, const char *value)
+{
+    requireAllIndexes(name, indexCount);
+    emit("[]=", value, offset.addr, name);
+}
+
+// ---------------------------------------------------------------------
 // Funções do programa
 // ---------------------------------------------------------------------
 
@@ -285,6 +397,9 @@ void codegenBeginFunction(const char *name)
     copyField(labels[labelCount].name, ADDR_SIZE, name);
     labels[labelCount].firstInstr = nextinstr();
     labelCount++;
+
+    // Cada função tem suas próprias variáveis: esquece os vetores da anterior.
+    arrayCount = 0;
 }
 
 // Diz se a última instrução emitida na função atual é um return.
@@ -321,6 +436,8 @@ void initCodegen(void)
     quadCount = 0;
     tempCount = 0;
     labelCount = 0;
+    arrayCount = 0;
+    pendingCount = 0;
 }
 
 // Desvio é qualquer instrução cujo destino fica em result: goto e if...

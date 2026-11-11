@@ -64,7 +64,8 @@ static IntList statement(Parser *parser);
 static void readStatement(Parser *parser);
 static void readTerm(Parser *parser);
 static void newReadTerm(Parser *parser);
-static int dimension2(Parser *parser);
+static int dimension2(Parser *parser, const char *arrayName, int level, Expr *offset);
+static Expr variableValue(const char *name, int indexCount, Expr offset);
 static void writeStatement(Parser *parser);
 static void writeTerm(Parser *parser, ArgList *terms);
 static void newWriteTerm(Parser *parser, ArgList *terms);
@@ -157,6 +158,7 @@ static SemType returnType(Parser *parser)
 // TIPO → TIPOBASE DIMENSÃO
 static SemType type(Parser *parser)
 {
+    beginTypeDimensions(); // CODEGEN: as dimensões lidas a seguir são deste tipo
     BaseType base = baseType(parser);
     int dimensions = dimension(parser);
     return makeType(base, dimensions);
@@ -195,6 +197,7 @@ static int dimension(Parser *parser)
     if (parser->currentToken.type == TOKEN_OPEN_BRACKET)
     {
         match(parser, TOKEN_OPEN_BRACKET);
+        recordDimension(parser->currentToken.lexeme); // CODEGEN: tamanho desta dimensão
         match(parser, TOKEN_NUM_INT);
         match(parser, TOKEN_CLOSE_BRACKET);
         return 1 + dimension(parser);
@@ -214,6 +217,7 @@ static void parameters(Parser *parser)
         Token id = parser->currentToken;
         match(parser, TOKEN_ID);
         declareParameter(id.lexeme, paramType, id.line);
+        declareArrayDimensions(id.lexeme); // CODEGEN: guarda os tamanhos se for vetor
         parameterList(parser);
     }
 }
@@ -228,6 +232,7 @@ static void parameterList(Parser *parser)
         Token id = parser->currentToken;
         match(parser, TOKEN_ID);
         declareParameter(id.lexeme, paramType, id.line);
+        declareArrayDimensions(id.lexeme); // CODEGEN: guarda os tamanhos se for vetor
         parameterList(parser);
     }
 }
@@ -273,6 +278,7 @@ static void varList(Parser *parser)
         Token id = parser->currentToken;
         match(parser, TOKEN_ID);
         declareVariable(id.lexeme, varType, id.line);
+        declareArrayDimensions(id.lexeme); // CODEGEN: guarda os tamanhos se for vetor
         idList(parser, varType);
         match(parser, TOKEN_SEMICOLON);
         varList(parser);
@@ -288,6 +294,7 @@ static void idList(Parser *parser, SemType varType)
         Token id = parser->currentToken;
         match(parser, TOKEN_ID);
         declareVariable(id.lexeme, varType, id.line);
+        declareArrayDimensions(id.lexeme); // CODEGEN: guarda os tamanhos se for vetor
         idList(parser, varType);
     }
 }
@@ -368,14 +375,26 @@ static void readStatement(Parser *parser)
 
 // TERMOLEITURA → id DIMENSAO2
 // Cada termo lido vira uma chamada sem argumentos: "id = call scanf, 0".
+// Num elemento de vetor: "t = call scanf, 0" e depois "v[i] = t".
 static void readTerm(Parser *parser)
 {
     Token id = parser->currentToken;
     match(parser, TOKEN_ID);
     SemType varType = requireVariable(id.lexeme, id.line);
-    int indexCount = dimension2(parser);
+    Expr offset = makeValue(""); // CODEGEN: preenchido por dimension2 se houver índice
+    int indexCount = dimension2(parser, id.lexeme, 0, &offset);
     indexedType(varType, indexCount, id.lexeme, id.line);
-    emitCall("scanf", 0, id.lexeme); // CODEGEN: id = call scanf, 0
+
+    if (indexCount == 0)
+    {
+        emitCall("scanf", 0, id.lexeme); // CODEGEN: id = call scanf, 0
+        return;
+    }
+
+    char temp[ADDR_SIZE];
+    newTemp(temp);
+    emitCall("scanf", 0, temp);                                // CODEGEN: t = call scanf, 0
+    emitArrayWrite(id.lexeme, indexCount, offset, temp);       // CODEGEN: v[i] = t
 }
 
 // NOVOTERMOLEITURA → , TERMOLEITURA NOVOTERMOLEITURA | ε
@@ -391,7 +410,9 @@ static void newReadTerm(Parser *parser)
 
 // DIMENSAO2 → [ EXPR_ADITIVA ] DIMENSAO2 | ε
 // Confere que cada índice é int e devolve quantos índices foram usados.
-static int dimension2(Parser *parser)
+// CODEGEN: 'offset' acumula o índice linear de 'arrayName' (índice de
+// elemento, sem largura em bytes); 'level' é a posição do índice atual.
+static int dimension2(Parser *parser, const char *arrayName, int level, Expr *offset)
 {
     if (parser->currentToken.type == TOKEN_OPEN_BRACKET)
     {
@@ -399,10 +420,22 @@ static int dimension2(Parser *parser)
         int line = parser->currentToken.line;
         Attr index = additiveExpr(parser);
         requireIntIndex(index.type, line);
+        *offset = arrayOffset(arrayName, level, *offset, index.code); // CODEGEN: offset * tam + índice
         match(parser, TOKEN_CLOSE_BRACKET);
-        return 1 + dimension2(parser);
+        return 1 + dimension2(parser, arrayName, level + 1, offset);
     }
     return 0;
+}
+
+// CODEGEN: endereço de "id" ou, se houver índices, do elemento lido
+// num temporário ("t = v[i]", a instrução x = y[i] da aula).
+static Expr variableValue(const char *name, int indexCount, Expr offset)
+{
+    if (indexCount == 0)
+    {
+        return makeValue(name);
+    }
+    return emitArrayRead(name, indexCount, offset);
 }
 
 // ESCRITA → println ( TERMOESCRITA NOVOTERMOESCRITA ) ;
@@ -433,10 +466,15 @@ static void writeTerm(Parser *parser, ArgList *terms)
     {
         match(parser, TOKEN_ID);
         SemType varType = requireVariable(current.lexeme, current.line);
-        int indexCount = dimension2(parser);
+        Expr offset = makeValue(""); // CODEGEN: preenchido por dimension2 se houver índice
+        int indexCount = dimension2(parser, current.lexeme, 0, &offset);
         indexedType(varType, indexCount, current.lexeme, current.line);
+        Expr value = variableValue(current.lexeme, indexCount, offset); // CODEGEN: id ou t = v[i]
+        addArgument(terms, value.addr);                                 // CODEGEN
+        return;
     }
-    else if (current.type == TOKEN_TEXT)
+
+    if (current.type == TOKEN_TEXT)
     {
         match(parser, TOKEN_TEXT);
     }
@@ -445,7 +483,7 @@ static void writeTerm(Parser *parser, ArgList *terms)
         constant(parser);
     }
 
-    addArgument(terms, current.lexeme); // CODEGEN: endereço do termo
+    addArgument(terms, current.lexeme); // CODEGEN: o próprio texto ou número
 }
 
 // NOVOTERMOESCRITA → , TERMOESCRITA NOVOTERMOESCRITA | ε
@@ -890,9 +928,11 @@ static Attr term(Parser *parser)
     {
         match(parser, TOKEN_ID);
         SemType varType = requireVariable(current.lexeme, current.line);
-        int indexCount = dimension2(parser);
+        Expr offset = makeValue(""); // CODEGEN: preenchido por dimension2 se houver índice
+        int indexCount = dimension2(parser, current.lexeme, 0, &offset);
         SemType result = indexedType(varType, indexCount, current.lexeme, current.line);
-        return makeAttr(result, makeValue(current.lexeme)); // CODEGEN: E.addr = id
+        Expr value = variableValue(current.lexeme, indexCount, offset); // CODEGEN: E.addr = id ou t = v[i]
+        return makeAttr(result, value);
     }
 
     SemType constType = constant(parser);

@@ -18,6 +18,8 @@
 #define OP_SIZE 16       // tamanho do campo op
 #define MAX_FUNCTIONS 64 // número máximo de funções (rótulos)
 #define MAX_ARGS 32      // número máximo de argumentos numa chamada/println
+#define MAX_ARRAYS 64    // número máximo de vetores declarados numa função
+#define MAX_DIMS 8       // número máximo de dimensões de um vetor
 
 // Destino ainda desconhecido de um desvio (será preenchido por backpatch).
 #define PENDING_TARGET "_"
@@ -145,6 +147,30 @@ void emitParams(const ArgList *args);
 
 // Emite "call f, n" (target NULL) ou "target = call f, n".
 void emitCall(const char *function, int argCount, const char *target);
+
+// ---- Vetores ----
+// O tamanho de cada dimensão vem da declaração (ex.: int[3][4] m).
+// O gerador guarda esses tamanhos por nome, só dentro da função atual.
+
+// Começa a ler um TIPO: descarta as dimensões do tipo anterior.
+void beginTypeDimensions(void);
+
+// Guarda o tamanho de mais uma dimensão do TIPO sendo lido (lexema do num_int).
+void recordDimension(const char *size);
+
+// Associa as dimensões do TIPO atual ao nome declarado (se for vetor).
+void declareArrayDimensions(const char *name);
+
+// Índice linear, linha a linha: com int[3][4] m, m[i][j] vira i * 4 + j.
+// 'level' é a posição do índice (0 = primeiro). No nível 0 o índice é o
+// próprio deslocamento; nos seguintes: t1 = offset * tamanho; t2 = t1 + index.
+Expr arrayOffset(const char *name, int level, Expr offset, Expr index);
+
+// x = y[i]: lê o elemento e devolve o temporário com o valor.
+Expr emitArrayRead(const char *name, int indexCount, Expr offset);
+
+// x[i] = y: grava 'value' no elemento.
+void emitArrayWrite(const char *name, int indexCount, Expr offset, const char *value);
 
 // ---- Funções do programa ----
 
