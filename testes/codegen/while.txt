@@ -1,0 +1,9 @@
+// Aula 14, slide 15: comando while ("int i = 1;" vira declaração + atribuição).
+main() {
+    int i;
+
+    i = 1;
+    while (i < 10) {
+        i = i + 2;
+    }
+}

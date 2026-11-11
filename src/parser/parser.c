@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include "parser.h"
 #include "semantic.h"
+#include "codegen.h"
 
 static void advance(Parser *parser)
 {
@@ -108,12 +109,14 @@ static void functionDecl(Parser *parser)
     Token id = parser->currentToken;
     match(parser, TOKEN_ID);
     beginFunction(id.lexeme, functionType, id.line);
+    codegenBeginFunction(id.lexeme); // CODEGEN: rótulo "nome:" da função
 
     match(parser, TOKEN_OPEN_PAREN);
     parameters(parser);
     match(parser, TOKEN_CLOSE_PAREN);
     block(parser);
 
+    codegenEndFunction(emptylist()); // CODEGEN: return implícito se preciso
     endFunction();
 }
 
@@ -215,11 +218,13 @@ static void mainFunction(Parser *parser)
 
     // main devolve int (por isso "return 0;" é válido)
     beginFunction(mainToken.lexeme, makeType(TYPE_INT, 0), mainToken.line);
+    codegenBeginFunction(mainToken.lexeme); // CODEGEN: rótulo "main:"
 
     match(parser, TOKEN_OPEN_PAREN);
     match(parser, TOKEN_CLOSE_PAREN);
     block(parser);
 
+    codegenEndFunction(emptylist()); // CODEGEN: return implícito se preciso
     endFunction();
 }
 

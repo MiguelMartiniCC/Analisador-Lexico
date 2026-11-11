@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "codegen.h"
 #include "lexer.h"
 #include "parser.h"
 #include "semantic.h"
@@ -86,6 +87,12 @@ int main(int argc, char *argv[])
      * termina dentro de parse().
      */
 
+    /*
+     * O gerador de código intermediário também roda dentro de parse():
+     * as instruções ficam em memória e só são mostradas no final.
+     */
+    initCodegen();
+
     Parser parser;
     initParser(&parser, &lexer);
     parse(&parser);
@@ -95,6 +102,16 @@ int main(int argc, char *argv[])
      * Mostra a tabela semântica e a mensagem de sucesso.
      */
     finishSemanticAnalysis();
+
+    /*
+     * Só um programa sem erros chega aqui, então nunca imprimimos
+     * código parcial. Antes, confere que todo desvio recebeu destino.
+     */
+    checkNoPendingJumps();
+
+    printf("\n=== CÓDIGO INTERMEDIÁRIO ===\n");
+    printCode(stdout);
+    writeCodeFile(argv[1]);
 
     fclose(file);
 
