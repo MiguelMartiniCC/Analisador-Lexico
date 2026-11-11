@@ -1,0 +1,23 @@
+// Funções: return com valor, return de booleano, chamada com e sem destino.
+int dobro(int n) {
+    return n * 2;
+}
+
+boolean positivo(int n) {
+    return n > 0;
+}
+
+void mostrar(int v, boolean p) {
+    println("valor:", v, p);
+}
+
+main() {
+    int a, b;
+    boolean p;
+
+    a = 5;
+    b = func dobro(a + 1);
+    p = func positivo(b);
+    func mostrar(b, a < b)
+    return 0;
+}

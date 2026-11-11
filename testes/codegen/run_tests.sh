@@ -1,6 +1,7 @@
 #!/bin/sh
 # Roda o compilador em cada testes/codegen/*.txt e compara o .tac gerado
 # com o gabarito .esperado.tac (escrito à mão a partir do SDT/slides).
+# Também confere o programa completo testes/compiler/teste.txt.
 # Uso: sh testes/codegen/run_tests.sh [caminho-do-compilador]
 
 COMPILER=${1:-./compiler}
@@ -8,7 +9,7 @@ DIR=testes/codegen
 passed=0
 failed=0
 
-for source in "$DIR"/*.txt; do
+for source in "$DIR"/*.txt testes/compiler/teste.txt; do
     name=${source%.txt}
     expected="$name.esperado.tac"
     generated="$name.tac"

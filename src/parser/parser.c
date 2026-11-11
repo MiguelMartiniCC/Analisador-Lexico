@@ -66,16 +66,17 @@ static void readTerm(Parser *parser);
 static void newReadTerm(Parser *parser);
 static int dimension2(Parser *parser);
 static void writeStatement(Parser *parser);
-static void writeTerm(Parser *parser);
-static void newWriteTerm(Parser *parser);
+static void writeTerm(Parser *parser, ArgList *terms);
+static void newWriteTerm(Parser *parser, ArgList *terms);
 static IntList ifStatement(Parser *parser);
 static IntList elseClause(Parser *parser, Expr condition, IntList thenNext);
 static IntList whileStatement(Parser *parser);
 static void assignmentStatement(Parser *parser);
 static SemType complement(Parser *parser, const char *target);
-static SemType functionCall(Parser *parser);
-static int arguments(Parser *parser, const char *functionName);
-static int newArgument(Parser *parser, const char *functionName, int position);
+static SemType functionCall(Parser *parser, const char *target);
+static int arguments(Parser *parser, const char *functionName, ArgList *args);
+static int newArgument(Parser *parser, const char *functionName, int position, ArgList *args);
+static void addArgumentValue(ArgList *args, Attr argument);
 static void returnStatement(Parser *parser);
 static Attr expression(Parser *parser);
 static Attr orExpr(Parser *parser);
@@ -332,7 +333,7 @@ static IntList statement(Parser *parser)
         next = ifStatement(parser); // CODEGEN: S.nextlist
         break;
     case TOKEN_FUNC:
-        functionCall(parser);
+        functionCall(parser, NULL); // CODEGEN: chamada sem destino ("call f, n")
         break;
     case TOKEN_WHILE:
         next = whileStatement(parser); // CODEGEN: S.nextlist
@@ -366,6 +367,7 @@ static void readStatement(Parser *parser)
 }
 
 // TERMOLEITURA → id DIMENSAO2
+// Cada termo lido vira uma chamada sem argumentos: "id = call scanf, 0".
 static void readTerm(Parser *parser)
 {
     Token id = parser->currentToken;
@@ -373,6 +375,7 @@ static void readTerm(Parser *parser)
     SemType varType = requireVariable(id.lexeme, id.line);
     int indexCount = dimension2(parser);
     indexedType(varType, indexCount, id.lexeme, id.line);
+    emitCall("scanf", 0, id.lexeme); // CODEGEN: id = call scanf, 0
 }
 
 // NOVOTERMOLEITURA → , TERMOLEITURA NOVOTERMOLEITURA | ε
@@ -403,28 +406,37 @@ static int dimension2(Parser *parser)
 }
 
 // ESCRITA → println ( TERMOESCRITA NOVOTERMOESCRITA ) ;
+// Tratado como chamada de procedimento: um "param" por termo e "call println, n".
 static void writeStatement(Parser *parser)
 {
+    ArgList terms;
+    initArgList(&terms); // CODEGEN: endereços dos termos, na ordem
+
     match(parser, TOKEN_PRINTLN);
     match(parser, TOKEN_OPEN_PAREN);
-    writeTerm(parser);
-    newWriteTerm(parser);
+    writeTerm(parser, &terms);
+    newWriteTerm(parser, &terms);
     match(parser, TOKEN_CLOSE_PAREN);
     match(parser, TOKEN_SEMICOLON);
+
+    emitParams(&terms);                          // CODEGEN: param x (um por termo)
+    emitCall("println", terms.count, NULL);      // CODEGEN: call println, n
 }
 
 // TERMOESCRITA → id DIMENSAO2 | CONSTANTE | texto
-static void writeTerm(Parser *parser)
+// Guarda em 'terms' o endereço do termo (o próprio id, número ou texto).
+static void writeTerm(Parser *parser, ArgList *terms)
 {
-    if (parser->currentToken.type == TOKEN_ID)
+    Token current = parser->currentToken;
+
+    if (current.type == TOKEN_ID)
     {
-        Token id = parser->currentToken;
         match(parser, TOKEN_ID);
-        SemType varType = requireVariable(id.lexeme, id.line);
+        SemType varType = requireVariable(current.lexeme, current.line);
         int indexCount = dimension2(parser);
-        indexedType(varType, indexCount, id.lexeme, id.line);
+        indexedType(varType, indexCount, current.lexeme, current.line);
     }
-    else if (parser->currentToken.type == TOKEN_TEXT)
+    else if (current.type == TOKEN_TEXT)
     {
         match(parser, TOKEN_TEXT);
     }
@@ -432,16 +444,18 @@ static void writeTerm(Parser *parser)
     {
         constant(parser);
     }
+
+    addArgument(terms, current.lexeme); // CODEGEN: endereço do termo
 }
 
 // NOVOTERMOESCRITA → , TERMOESCRITA NOVOTERMOESCRITA | ε
-static void newWriteTerm(Parser *parser)
+static void newWriteTerm(Parser *parser, ArgList *terms)
 {
     if (parser->currentToken.type == TOKEN_COMMA)
     {
         match(parser, TOKEN_COMMA);
-        writeTerm(parser);
-        newWriteTerm(parser);
+        writeTerm(parser, terms);
+        newWriteTerm(parser, terms);
     }
 }
 
@@ -529,7 +543,7 @@ static SemType complement(Parser *parser, const char *target)
 {
     if (parser->currentToken.type == TOKEN_FUNC)
     {
-        return functionCall(parser);
+        return functionCall(parser, target); // CODEGEN: id = call f, n (direto, sem temporário)
     }
 
     Attr value = expression(parser);
@@ -540,22 +554,39 @@ static SemType complement(Parser *parser, const char *target)
 
 // FUNÇÃO → func id ( ARGUMENTOS ) IMPORTANTE: ADICIONAR O FUNC NO TOKEN.H E NA LEITURA DO LEXER.
 // Devolve o tipo de retorno da função chamada.
-static SemType functionCall(Parser *parser)
+// 'target' recebe o resultado ("target = call f, n"); NULL quando a chamada
+// é um comando sozinho ("call f, n").
+// Todos os argumentos são avaliados antes do primeiro param, para que o
+// código de um argumento não fique no meio da sequência de params.
+static SemType functionCall(Parser *parser, const char *target)
 {
+    ArgList args;
+    initArgList(&args); // CODEGEN: endereços dos argumentos, na ordem
+
     match(parser, TOKEN_FUNC);
     Token id = parser->currentToken;
     match(parser, TOKEN_ID);
     SemType result = requireFunction(id.lexeme, id.line);
     match(parser, TOKEN_OPEN_PAREN);
-    int argumentCount = arguments(parser, id.lexeme);
+    int argumentCount = arguments(parser, id.lexeme, &args);
     match(parser, TOKEN_CLOSE_PAREN);
     checkArgumentCount(id.lexeme, argumentCount, id.line);
+
+    emitParams(&args);                             // CODEGEN: param x (um por argumento)
+    emitCall(id.lexeme, argumentCount, target);    // CODEGEN: [target =] call f, n
     return result;
+}
+
+// Avalia um argumento e guarda o endereço dele (booleano vira 0/1).
+static void addArgumentValue(ArgList *args, Attr argument)
+{
+    Expr value = toValue(argument.code); // CODEGEN: booleano (ex.: a < b) vira 0/1
+    addArgument(args, value.addr);       // CODEGEN: guarda o endereço para o param
 }
 
 // ARGUMENTOS → EXPRESSÃO NOVO_ARGUMENTO | ε
 // Confere o tipo de cada argumento e devolve quantos argumentos a chamada tem.
-static int arguments(Parser *parser, const char *functionName)
+static int arguments(Parser *parser, const char *functionName, ArgList *args)
 {
     if (parser->currentToken.type == TOKEN_SUM ||
         parser->currentToken.type == TOKEN_SUB ||
@@ -569,14 +600,15 @@ static int arguments(Parser *parser, const char *functionName)
         int line = parser->currentToken.line;
         Attr argument = expression(parser);
         checkArgument(functionName, 0, argument.type, line);
-        return 1 + newArgument(parser, functionName, 1);
+        addArgumentValue(args, argument); // CODEGEN
+        return 1 + newArgument(parser, functionName, 1, args);
     }
     return 0;
 }
 
 // NOVO_ARGUMENTO → , EXPRESSÃO NOVO_ARGUMENTO | ε
 // 'position' é a posição (a partir de 0) do próximo argumento.
-static int newArgument(Parser *parser, const char *functionName, int position)
+static int newArgument(Parser *parser, const char *functionName, int position, ArgList *args)
 {
     if (parser->currentToken.type == TOKEN_COMMA)
     {
@@ -584,18 +616,22 @@ static int newArgument(Parser *parser, const char *functionName, int position)
         int line = parser->currentToken.line;
         Attr argument = expression(parser);
         checkArgument(functionName, position, argument.type, line);
-        return 1 + newArgument(parser, functionName, position + 1);
+        addArgumentValue(args, argument); // CODEGEN
+        return 1 + newArgument(parser, functionName, position + 1, args);
     }
     return 0;
 }
 
 // RETORNO → return EXPRESSÃO ;
+// Gera "return y", com y = endereço da expressão (booleano vira 0/1).
 static void returnStatement(Parser *parser)
 {
     Token returnToken = parser->currentToken;
     match(parser, TOKEN_RETURN);
     Attr value = expression(parser);
     checkReturn(value.type, returnToken.line);
+    Expr result = toValue(value.code);            // CODEGEN: booleano vira 0/1
+    emit("return", result.addr, NULL, NULL);      // CODEGEN: return y
     match(parser, TOKEN_SEMICOLON);
 }
 

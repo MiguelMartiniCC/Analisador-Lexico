@@ -237,6 +237,40 @@ void emitGoto(int target)
 }
 
 // ---------------------------------------------------------------------
+// Chamadas
+// ---------------------------------------------------------------------
+
+void initArgList(ArgList *args)
+{
+    args->count = 0;
+}
+
+void addArgument(ArgList *args, const char *addr)
+{
+    if (args->count >= MAX_ARGS)
+    {
+        codegenFatal("argumentos demais numa chamada (limite MAX_ARGS).");
+    }
+    copyField(args->addr[args->count], ADDR_SIZE, addr);
+    args->count++;
+}
+
+void emitParams(const ArgList *args)
+{
+    for (int i = 0; i < args->count; i++)
+    {
+        emit("param", args->addr[i], NULL, NULL);
+    }
+}
+
+void emitCall(const char *function, int argCount, const char *target)
+{
+    char count[ADDR_SIZE];
+    snprintf(count, ADDR_SIZE, "%d", argCount);
+    emit("call", function, count, target);
+}
+
+// ---------------------------------------------------------------------
 // Funções do programa
 // ---------------------------------------------------------------------
 

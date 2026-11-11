@@ -17,6 +17,7 @@
 #define ADDR_SIZE 256    // tamanho de um endereço (lexema de até 255 caracteres + '\0')
 #define OP_SIZE 16       // tamanho do campo op
 #define MAX_FUNCTIONS 64 // número máximo de funções (rótulos)
+#define MAX_ARGS 32      // número máximo de argumentos numa chamada/println
 
 // Destino ainda desconhecido de um desvio (será preenchido por backpatch).
 #define PENDING_TARGET "_"
@@ -58,6 +59,16 @@ typedef struct
     IntList truelist;
     IntList falselist;
 } Expr;
+
+/*
+ * Endereços dos argumentos de uma chamada (ou dos termos de um println),
+ * na ordem em que aparecem. Todos são avaliados antes do primeiro param.
+ */
+typedef struct
+{
+    char addr[MAX_ARGS][ADDR_SIZE];
+    int count;
+} ArgList;
 
 // ---- Funções do SDT (mesmos nomes da aula) ----
 
@@ -120,6 +131,20 @@ IntList emitGotoPlaceholder(void);
 
 // emit('goto' target), com destino já conhecido (o "goto M1.instr" do while).
 void emitGoto(int target);
+
+// ---- Chamadas ----
+
+// Começa uma lista de argumentos vazia.
+void initArgList(ArgList *args);
+
+// Guarda o endereço de mais um argumento (já avaliado).
+void addArgument(ArgList *args, const char *addr);
+
+// Emite "param x" para cada argumento, na ordem.
+void emitParams(const ArgList *args);
+
+// Emite "call f, n" (target NULL) ou "target = call f, n".
+void emitCall(const char *function, int argCount, const char *target);
 
 // ---- Funções do programa ----
 
