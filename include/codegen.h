@@ -107,6 +107,14 @@ Expr emitRelational(const char *relop, Expr left, Expr right);
 // "if x goto _" e "goto _"; uma expressão já booleana volta igual.
 Expr toCondition(Expr expr);
 
+// Garante um endereço (booleano usado como valor, ex.: "ok = a < b").
+// Uma expressão em código de desvio vira um temporário com 1 ou 0:
+//   truelist  -> k:   t = 1
+//                k+1: goto k+3
+//   falselist -> k+2: t = 0
+// Um valor volta igual.
+Expr toValue(Expr expr);
+
 // N → ε: N.nextlist = makelist(nextinstr); emit('goto _').
 IntList emitGotoPlaceholder(void);
 

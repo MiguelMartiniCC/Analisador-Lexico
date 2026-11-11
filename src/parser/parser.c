@@ -533,7 +533,8 @@ static SemType complement(Parser *parser, const char *target)
     }
 
     Attr value = expression(parser);
-    emit("=", value.code.addr, NULL, target); // CODEGEN: id = E.addr
+    Expr result = toValue(value.code);     // CODEGEN: booleano (ex.: a < b) vira 0/1
+    emit("=", result.addr, NULL, target);  // CODEGEN: id = E.addr
     return value.type;
 }
 

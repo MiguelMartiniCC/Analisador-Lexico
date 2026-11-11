@@ -200,6 +200,28 @@ Expr toCondition(Expr expr)
     return makeBool(truelist, falselist);
 }
 
+Expr toValue(Expr expr)
+{
+    if (!expr.is_bool)
+    {
+        return expr;
+    }
+
+    // Os desvios de B já foram emitidos; agora damos destino a eles:
+    // o caminho "verdadeiro" grava 1 e pula o "falso", que grava 0.
+    char temp[ADDR_SIZE];
+    newTemp(temp);
+
+    backpatch(expr.truelist, nextinstr());
+    emit("=", "1", NULL, temp);
+    emitGoto(nextinstr() + 2); // pula a instrução "t = 0"
+
+    backpatch(expr.falselist, nextinstr());
+    emit("=", "0", NULL, temp);
+
+    return makeValue(temp);
+}
+
 IntList emitGotoPlaceholder(void)
 {
     IntList nextlist = makelist(nextinstr());
