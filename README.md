@@ -2,11 +2,12 @@
 
 Repositório acadêmico em C para a disciplina de Compiladores (IFSC Lages).
 
-O projeto já conta com o **Analisador Léxico**, o **Analisador Sintático** e o **Analisador Semântico** implementados e integrados. O executável (`compiler.exe` no Windows, `compiler` no Linux/macOS) lê um arquivo de código-fonte e executa:
+O projeto já conta com o **Analisador Léxico**, o **Analisador Sintático**, o **Analisador Semântico** e o **Gerador de Código Intermediário** implementados e integrados. O executável (`compiler.exe` no Windows, `compiler` no Linux/macOS) lê um arquivo de código-fonte e executa:
 
 1. **Análise léxica** — processa o conteúdo caractere por caractere e gera a lista de tokens e a **Tabela de Símbolos** (as regras léxicas seguem a tabela de expressões regulares da Aula 4);
 2. **Análise sintática** — consome os tokens gerados pelo lexer e valida a gramática da linguagem;
-3. **Análise semântica** — executada junto com o parser, confere declarações, tipos, chamadas de função e retornos (veja [Análise semântica](#análise-semântica)).
+3. **Análise semântica** — executada junto com o parser, confere declarações, tipos, chamadas de função e retornos (veja [Análise semântica](#análise-semântica));
+4. **Geração de código intermediário** — também junto com o parser, produz código de três endereços com backpatching (veja [Geração de código intermediário](#geração-de-código-intermediário)).
 
 Explicações detalhadas do código: [`EXPLICACAO.md`](EXPLICACAO.md) (léxico e sintático) e [`EXPLICACAO_SEMANTICA.md`](EXPLICACAO_SEMANTICA.md) (semântico).
 
@@ -16,8 +17,9 @@ Explicações detalhadas do código: [`EXPLICACAO.md`](EXPLICACAO.md) (léxico e
 
 ```text
 Compilador/
-├── Makefile                    # Compila e executa o compilador
+├── Makefile                    # Compila, executa e testa o compilador
 ├── include/                    # Cabeçalhos (.h)
+│   ├── codegen.h               # Quádruplas, listas e interface do gerador
 │   ├── token.h                 # TokenType e struct Token
 │   ├── lexer.h                 # Interface do analisador léxico
 │   ├── parser.h                # Interface do analisador sintático
@@ -25,6 +27,8 @@ Compilador/
 │   └── symbol_table.h          # Interface da Tabela de Símbolos
 │
 ├── src/
+│   ├── codegen/
+│   │   └── codegen.c           # Implementação do gerador de código intermediário
 │   ├── lexer/
 │   │   └── lexer.c             # Implementação do analisador léxico
 │   ├── parser/
@@ -40,10 +44,16 @@ Compilador/
     │   └── test2e.txt          # Entrada de teste do lexer
     ├── compiler/
     │   ├── teste.txt           # Programa válido (passa nas três análises)
+    │   ├── teste.esperado.tac  # Código intermediário esperado de teste.txt
     │   └── teste_erro.txt      # Erro sintático (falta ';')
-    └── semantico/
-        ├── valido.txt          # Programa válido com vetores, recursão e conversões
-        └── erro_*.txt          # Um erro semântico por arquivo
+    ├── semantico/
+    │   ├── valido.txt          # Programa válido com vetores, recursão e conversões
+    │   ├── valido.esperado.tac # Código intermediário esperado de valido.txt
+    │   └── erro_*.txt          # Um erro semântico por arquivo
+    └── codegen/
+        ├── run_tests.sh        # Roda os testes do gerador (make test)
+        ├── *.txt               # Um caso por arquivo (slides das Aulas 14 e 15 e extras)
+        └── *.esperado.tac      # Código esperado de cada caso
 ```
 
 O executável é gerado na raiz e não faz parte do código-fonte versionado.
@@ -78,6 +88,7 @@ Todos os comandos abaixo são executados **na raiz do repositório**.
 mingw32-make                                      # compila o compiler.exe
 mingw32-make run                                  # roda com o arquivo padrão (testes/compiler/teste.txt)
 mingw32-make run FILE=testes/semantico/erro_float_em_int.txt   # roda com outro arquivo
+mingw32-make test                                 # testes do gerador (precisa de sh; veja abaixo)
 mingw32-make clean                                # remove o executável
 ```
 
@@ -88,7 +99,7 @@ No Linux/macOS, use `make` no lugar de `mingw32-make`.
 ### Sem Makefile
 
 ```powershell
-gcc -Wall -Iinclude src/symbol_table/symbol_table.c src/lexer/lexer.c src/parser/parser.c src/semantic/semantic.c src/main.c -o compiler.exe
+gcc -Wall -Iinclude src/symbol_table/symbol_table.c src/lexer/lexer.c src/parser/parser.c src/semantic/semantic.c src/codegen/codegen.c src/main.c -o compiler.exe
 .\compiler.exe testes/compiler/teste.txt
 ```
 
@@ -154,9 +165,12 @@ Código-fonte
      ▼
    Semantic     (src/semantic)       → executa a ANÁLISE SEMÂNTICA
                                        e imprime a TABELA SEMÂNTICA
+   Codegen      (src/codegen)        → também chamado pelo parser: gera o
+                                       CÓDIGO INTERMEDIÁRIO, impresso e
+                                       gravado em .tac no final
 ```
 
-Em `main.c`, o arquivo-fonte é aberto e o lexer roda primeiro, imprimindo cada token com a linha e o lexeme. Depois o ponteiro do arquivo volta ao início (`fseek`), o lexer é reinicializado e o parser reconsome os tokens sob demanda via `getNextToken()`. Durante essa segunda passada o parser chama o analisador semântico; se o programa passar nas duas análises, `main.c` imprime a tabela semântica e a mensagem de sucesso.
+Em `main.c`, o arquivo-fonte é aberto e o lexer roda primeiro, imprimindo cada token com a linha e o lexeme. Depois o ponteiro do arquivo volta ao início (`fseek`), o lexer é reinicializado e o parser reconsome os tokens sob demanda via `getNextToken()`. Durante essa segunda passada o parser chama o analisador semântico e o gerador de código; se o programa passar nas duas análises, `main.c` imprime a tabela semântica, a mensagem de sucesso e o código intermediário.
 
 ### Interface do parser (`include/parser.h`)
 
@@ -180,7 +194,7 @@ A tabela é preenchida pelo lexer com **todos os identificadores encontrados**, 
 
 ## Análise semântica
 
-O analisador semântico (`include/semantic.h` e `src/semantic/semantic.c`) roda **junto com o parser, na mesma passada**: cada função do parser faz as verificações semânticas do trecho da gramática que reconhece. As funções de expressão devolvem o **tipo** do que reconheceram, e esse tipo é usado para conferir operadores, atribuições, argumentos e retornos. Ele tem uma tabela própria de declarações (nome, categoria, tipo e função dona), separada da Tabela de Símbolos do lexer.
+O analisador semântico (`include/semantic.h` e `src/semantic/semantic.c`) roda **junto com o parser, na mesma passada**: cada função do parser faz as verificações semânticas do trecho da gramática que reconhece. As funções de expressão devolvem o **tipo** do que reconheceram (o campo `type` do `Attr`, que também carrega o código do gerador), e esse tipo é usado para conferir operadores, atribuições, argumentos e retornos. Ele tem uma tabela própria de declarações (nome, categoria, tipo e função dona), separada da Tabela de Símbolos do lexer.
 
 No primeiro erro, o programa imprime a mensagem e termina, como no parser:
 
@@ -209,6 +223,33 @@ A explicação completa (tabela de declarações, escopo, como o parser devolve 
 
 ---
 
-## Próximas etapas
+## Geração de código intermediário
 
-- **Geração de código intermediário** — código de três endereços resumido, a partir do programa já validado pelas três análises.
+O gerador (`include/codegen.h` e `src/codegen/codegen.c`) produz **código de três endereços** com o esquema de tradução (SDT) com backpatching da Aula 15. Ele também roda **junto com o parser, na mesma passada**: as funções de expressão devolvem um `Attr`, que junta o tipo (para o semântico) e o código (para o gerador). As instruções ficam em memória e só são mostradas se o programa passar nas análises sintática e semântica:
+
+```text
+=== CÓDIGO INTERMEDIÁRIO ===
+main:
+1. i = 1
+2. if i < 10 goto 4
+3. goto 7
+4. t1 = i + 2
+5. i = t1
+6. goto 2
+7. return
+
+Código intermediário gravado em: testes/codegen/while.tac
+```
+
+O mesmo código é gravado em `<entrada sem extensão>.tac`, ao lado do arquivo de entrada (`testes/compiler/teste.txt` → `testes/compiler/teste.tac`). Os `.tac` gerados não são versionados.
+
+### Testes do gerador (testes de ouro)
+
+- `testes/codegen/caso.txt` — programa de teste; `testes/codegen/caso.esperado.tac` — código esperado, escrito à mão a partir dos slides (Aulas 14 e 15) e do SDT.
+- `testes/compiler/teste.esperado.tac` e `testes/semantico/valido.esperado.tac` — código esperado dos dois programas completos.
+
+```powershell
+mingw32-make test        # compila, roda cada caso e compara com o .esperado.tac
+```
+
+O alvo `test` roda `testes/codegen/run_tests.sh` e precisa de `sh` no `PATH` (no Windows, rode pelo Git Bash ou pelo terminal do MSYS2). Também dá para chamar o script direto: `sh testes/codegen/run_tests.sh ./compiler.exe`.
