@@ -94,6 +94,25 @@ Expr emitBinaryOp(const char *op, Expr left, Expr right);
 // E → - E1: E.addr = new Temp(); emit(E.addr '=' 'minus' E1.addr).
 Expr emitUnaryMinus(Expr operand);
 
+// ---- Condições (código de desvio, com curto-circuito) ----
+
+// Expressão booleana dada pelas suas listas de desvio.
+Expr makeBool(IntList truelist, IntList falselist);
+
+// B → E1 rel E2: B.truelist = makelist(nextinstr); B.falselist = makelist(nextinstr + 1);
+// emit('if' E1.addr rel E2.addr 'goto _'); emit('goto _').
+Expr emitRelational(const char *relop, Expr left, Expr right);
+
+// Garante código de desvio. Um valor x (ex.: "if (ok)") vira
+// "if x goto _" e "goto _"; uma expressão já booleana volta igual.
+Expr toCondition(Expr expr);
+
+// N → ε: N.nextlist = makelist(nextinstr); emit('goto _').
+IntList emitGotoPlaceholder(void);
+
+// emit('goto' target), com destino já conhecido (o "goto M1.instr" do while).
+void emitGoto(int target);
+
 // ---- Funções do programa ----
 
 // Começa o código de uma função: rótulo "nome:" antes da próxima instrução.

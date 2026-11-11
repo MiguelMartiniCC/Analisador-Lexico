@@ -1,0 +1,17 @@
+// Condição que é só um valor, negação, parênteses e && com || (mesma condição do teste.txt).
+main() {
+    int a, b;
+    boolean ok;
+
+    if (ok) {
+        a = 1;
+    }
+    if (!(a < b) && ok) {
+        a = 2;
+    } else {
+        a = 3;
+    }
+    while (a >= 18 && !ok || a != 0) {
+        a = a - 1;
+    }
+}

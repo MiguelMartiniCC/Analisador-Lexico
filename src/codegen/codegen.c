@@ -152,6 +152,69 @@ Expr emitUnaryMinus(Expr operand)
 }
 
 // ---------------------------------------------------------------------
+// Condições
+// ---------------------------------------------------------------------
+
+Expr makeBool(IntList truelist, IntList falselist)
+{
+    Expr expr;
+    expr.is_bool = 1;
+    expr.addr[0] = '\0'; // em código de desvio não existe endereço
+    expr.truelist = truelist;
+    expr.falselist = falselist;
+    return expr;
+}
+
+Expr emitRelational(const char *relop, Expr left, Expr right)
+{
+    // O op da quádrupla é "if" seguido do operador (ex.: "if<="),
+    // assim printCode sabe que é um desvio condicional relacional.
+    char op[OP_SIZE];
+    if (strlen("if") + strlen(relop) >= OP_SIZE)
+    {
+        codegenFatal("operador relacional maior que o limite (OP_SIZE).");
+    }
+    snprintf(op, OP_SIZE, "if%s", relop);
+
+    // As duas listas são criadas antes dos emits, como no SDT:
+    // o if fica na instrução nextinstr e o goto na seguinte.
+    IntList truelist = makelist(nextinstr());
+    IntList falselist = makelist(nextinstr() + 1);
+    emit(op, left.addr, right.addr, PENDING_TARGET);
+    emit("goto", NULL, NULL, PENDING_TARGET);
+    return makeBool(truelist, falselist);
+}
+
+Expr toCondition(Expr expr)
+{
+    if (expr.is_bool)
+    {
+        return expr;
+    }
+
+    // Mesmo formato de B → E1 rel E2, mas com "if x goto _".
+    IntList truelist = makelist(nextinstr());
+    IntList falselist = makelist(nextinstr() + 1);
+    emit("if", expr.addr, NULL, PENDING_TARGET);
+    emit("goto", NULL, NULL, PENDING_TARGET);
+    return makeBool(truelist, falselist);
+}
+
+IntList emitGotoPlaceholder(void)
+{
+    IntList nextlist = makelist(nextinstr());
+    emit("goto", NULL, NULL, PENDING_TARGET);
+    return nextlist;
+}
+
+void emitGoto(int target)
+{
+    char label[ADDR_SIZE];
+    snprintf(label, ADDR_SIZE, "%d", target);
+    emit("goto", NULL, NULL, label);
+}
+
+// ---------------------------------------------------------------------
 // Funções do programa
 // ---------------------------------------------------------------------
 

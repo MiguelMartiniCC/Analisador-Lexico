@@ -56,11 +56,11 @@ static int dimension(Parser *parser);
 static void parameters(Parser *parser);
 static void parameterList(Parser *parser);
 static void mainFunction(Parser *parser);
-static void block(Parser *parser);
+static IntList block(Parser *parser);
 static void varList(Parser *parser);
 static void idList(Parser *parser, SemType varType);
-static void statementList(Parser *parser);
-static void statement(Parser *parser);
+static IntList statementList(Parser *parser, IntList pending);
+static IntList statement(Parser *parser);
 static void readStatement(Parser *parser);
 static void readTerm(Parser *parser);
 static void newReadTerm(Parser *parser);
@@ -68,9 +68,9 @@ static int dimension2(Parser *parser);
 static void writeStatement(Parser *parser);
 static void writeTerm(Parser *parser);
 static void newWriteTerm(Parser *parser);
-static void ifStatement(Parser *parser);
-static void elseClause(Parser *parser);
-static void whileStatement(Parser *parser);
+static IntList ifStatement(Parser *parser);
+static IntList elseClause(Parser *parser, Expr condition, IntList thenNext);
+static IntList whileStatement(Parser *parser);
 static void assignmentStatement(Parser *parser);
 static SemType complement(Parser *parser, const char *target);
 static SemType functionCall(Parser *parser);
@@ -135,9 +135,9 @@ static void functionDecl(Parser *parser)
     match(parser, TOKEN_OPEN_PAREN);
     parameters(parser);
     match(parser, TOKEN_CLOSE_PAREN);
-    block(parser);
+    IntList next = block(parser);
 
-    codegenEndFunction(emptylist()); // CODEGEN: return implícito se preciso
+    codegenEndFunction(next); // CODEGEN: backpatch da nextlist que sobrou + return implícito
     endFunction();
 }
 
@@ -243,19 +243,21 @@ static void mainFunction(Parser *parser)
 
     match(parser, TOKEN_OPEN_PAREN);
     match(parser, TOKEN_CLOSE_PAREN);
-    block(parser);
+    IntList next = block(parser);
 
-    codegenEndFunction(emptylist()); // CODEGEN: return implícito se preciso
+    codegenEndFunction(next); // CODEGEN: backpatch da nextlist que sobrou + return implícito
     endFunction();
 }
 
 // BLOCO → { LISTAVARIÁVEIS COMANDOS }
-static void block(Parser *parser)
+// SDT: S → { L }  { S.nextlist = L.nextlist; }   (declarações não geram código)
+static IntList block(Parser *parser)
 {
     match(parser, TOKEN_OPEN_BRACE);
     varList(parser);
-    statementList(parser);
+    IntList next = statementList(parser, emptylist()); // CODEGEN: L.nextlist
     match(parser, TOKEN_CLOSE_BRACE);
+    return next;
 }
 
 // LISTAVARIÁVEIS → TIPO id LISTAID ; LISTAVARIÁVEIS | ε
@@ -290,7 +292,11 @@ static void idList(Parser *parser, SemType varType)
 }
 
 // COMANDOS → COMANDO COMANDOS | ε
-static void statementList(Parser *parser)
+// SDT: L → L1 M S  { backpatch(L1.nextlist, M.instr); L.nextlist = S.nextlist; }
+//      L → S       { L.nextlist = S.nextlist; }
+// 'pending' é a nextlist dos comandos já lidos (L1). Se vier outro comando,
+// ele começa em nextinstr (o M) e os desvios pendentes vão para lá.
+static IntList statementList(Parser *parser, IntList pending)
 {
     if (parser->currentToken.type == TOKEN_SCANF ||
         parser->currentToken.type == TOKEN_PRINTLN ||
@@ -300,14 +306,20 @@ static void statementList(Parser *parser)
         parser->currentToken.type == TOKEN_FUNC ||
         parser->currentToken.type == TOKEN_ID)
     {
-        statement(parser);
-        statementList(parser);
+        backpatch(pending, nextinstr()); // CODEGEN: backpatch(L1.nextlist, M.instr)
+        IntList next = statement(parser);
+        return statementList(parser, next);
     }
+    return pending; // CODEGEN: sem mais comandos, a nextlist sobe para quem chamou
 }
 
 // COMANDO → LEITURA | ESCRITA | ATRIBUIÇÃO | FUNÇÃO | SELEÇÃO | ENQUANTO | RETORNO
-static void statement(Parser *parser)
+// Devolve a nextlist do comando. Só if e while deixam desvios pendentes;
+// os demais seguem para a próxima instrução (SDT: S → A ;  { S.nextlist = null; }).
+static IntList statement(Parser *parser)
 {
+    IntList next = emptylist();
+
     switch (parser->currentToken.type)
     {
     case TOKEN_SCANF:
@@ -317,13 +329,13 @@ static void statement(Parser *parser)
         writeStatement(parser);
         break;
     case TOKEN_IF:
-        ifStatement(parser);
+        next = ifStatement(parser); // CODEGEN: S.nextlist
         break;
     case TOKEN_FUNC:
         functionCall(parser);
         break;
     case TOKEN_WHILE:
-        whileStatement(parser);
+        next = whileStatement(parser); // CODEGEN: S.nextlist
         break;
     case TOKEN_RETURN:
         returnStatement(parser);
@@ -338,6 +350,8 @@ static void statement(Parser *parser)
                tokenTypeToString(parser->currentToken.type));
         exit(EXIT_FAILURE);
     }
+
+    return next;
 }
 
 // LEITURA → scanf ( TERMOLEITURA NOVOTERMOLEITURA) ;
@@ -432,38 +446,67 @@ static void newWriteTerm(Parser *parser)
 }
 
 // SELEÇÃO → if ( EXPRESSÃO ) BLOCO SENÃO
-static void ifStatement(Parser *parser)
+// SDT: S → if ( B ) M S1                 e
+//      S → if ( B ) M1 S1 N else M2 S2
+// As duas regras começam iguais; quem decide entre elas é elseClause().
+static IntList ifStatement(Parser *parser)
 {
     match(parser, TOKEN_IF);
     match(parser, TOKEN_OPEN_PAREN);
     int line = parser->currentToken.line;
     Attr condition = expression(parser);
     requireCondition(condition.type, "if", line);
+    Expr b = toCondition(condition.code); // CODEGEN: B em código de desvio
     match(parser, TOKEN_CLOSE_PAREN);
-    block(parser);
-    elseClause(parser);
+
+    int m1 = nextinstr();                   // CODEGEN: M1.instr
+    IntList s1 = block(parser);
+    backpatch(b.truelist, m1);              // CODEGEN: backpatch(B.truelist, M1.instr)
+    return elseClause(parser, b, s1);
 }
 
 // SENÃO → else BLOCO | ε
-static void elseClause(Parser *parser)
+// Com else:  backpatch(B.falselist, M2.instr);
+//            S.nextlist = merge(merge(S1.nextlist, N.nextlist), S2.nextlist)
+// Sem else:  S.nextlist = merge(B.falselist, S1.nextlist)
+static IntList elseClause(Parser *parser, Expr condition, IntList thenNext)
 {
     if (parser->currentToken.type == TOKEN_ELSE)
     {
+        IntList n = emitGotoPlaceholder();  // CODEGEN: N (o "then" pula o else)
         match(parser, TOKEN_ELSE);
-        block(parser);
+        int m2 = nextinstr();               // CODEGEN: M2.instr
+        IntList s2 = block(parser);
+        backpatch(condition.falselist, m2); // CODEGEN: backpatch(B.falselist, M2.instr)
+        IntList temp = merge(thenNext, n);  // CODEGEN: temp = merge(S1.nextlist, N.nextlist)
+        return merge(temp, s2);             // CODEGEN: S.nextlist = merge(temp, S2.nextlist)
     }
+
+    return merge(condition.falselist, thenNext); // CODEGEN: S.nextlist (sem else)
 }
 
 // ENQUANTO → while ( EXPRESSÃO ) BLOCO
-static void whileStatement(Parser *parser)
+// SDT: S → while M1 ( B ) M2 S1  { backpatch(S1.nextlist, M1.instr);
+//                                  backpatch(B.truelist, M2.instr);
+//                                  S.nextlist = B.falselist;
+//                                  emit('goto' M1.instr); }
+static IntList whileStatement(Parser *parser)
 {
     match(parser, TOKEN_WHILE);
+    int m1 = nextinstr();                   // CODEGEN: M1.instr (início do teste)
     match(parser, TOKEN_OPEN_PAREN);
     int line = parser->currentToken.line;
     Attr condition = expression(parser);
     requireCondition(condition.type, "while", line);
+    Expr b = toCondition(condition.code); // CODEGEN: B em código de desvio
     match(parser, TOKEN_CLOSE_PAREN);
-    block(parser);
+
+    int m2 = nextinstr();                   // CODEGEN: M2.instr (início do corpo)
+    IntList s1 = block(parser);
+    backpatch(s1, m1);                      // CODEGEN: backpatch(S1.nextlist, M1.instr)
+    backpatch(b.truelist, m2);              // CODEGEN: backpatch(B.truelist, M2.instr)
+    emitGoto(m1);                           // CODEGEN: emit('goto' M1.instr)
+    return b.falselist;                     // CODEGEN: S.nextlist = B.falselist
 }
 
 // ATRIBUIÇÃO → id = COMPLEMENTO ;
@@ -571,15 +614,24 @@ static Attr orExpr(Parser *parser)
 
 // EXPR_OU2 → || EXPR_E EXPR_OU2 | ε
 // 'left' é o que já foi lido à esquerda do operador.
+// SDT: B → B1 || M B2  { backpatch(B1.falselist, M.instr);
+//                        B.truelist = merge(B1.truelist, B2.truelist);
+//                        B.falselist = B2.falselist; }
 static Attr orExpr2(Parser *parser, Attr left)
 {
     if (parser->currentToken.type == TOKEN_OR)
     {
         Token op = parser->currentToken;
         match(parser, TOKEN_OR);
+        Expr b1 = toCondition(left.code);   // CODEGEN: B1 em código de desvio
+        int m = nextinstr();                // CODEGEN: M.instr (início de B2)
         Attr right = andExpr(parser);
+        Expr b2 = toCondition(right.code);  // CODEGEN: B2 em código de desvio
         SemType result = logicalType(left.type, right.type, op.lexeme, op.line);
-        return orExpr2(parser, makeAttr(result, left.code));
+
+        backpatch(b1.falselist, m);         // CODEGEN: B1 falso -> testa B2
+        Expr b = makeBool(merge(b1.truelist, b2.truelist), b2.falselist); // CODEGEN
+        return orExpr2(parser, makeAttr(result, b));
     }
     return left;
 }
@@ -592,15 +644,24 @@ static Attr andExpr(Parser *parser)
 }
 
 // EXPR_E2 → && EXPR_RELACIONAL EXPR_E2 | ε
+// SDT: B → B1 && M B2  { backpatch(B1.truelist, M.instr);
+//                        B.truelist = B2.truelist;
+//                        B.falselist = merge(B1.falselist, B2.falselist); }
 static Attr andExpr2(Parser *parser, Attr left)
 {
     if (parser->currentToken.type == TOKEN_AND)
     {
         Token op = parser->currentToken;
         match(parser, TOKEN_AND);
+        Expr b1 = toCondition(left.code);   // CODEGEN: B1 em código de desvio
+        int m = nextinstr();                // CODEGEN: M.instr (início de B2)
         Attr right = relationalExpr(parser);
+        Expr b2 = toCondition(right.code);  // CODEGEN: B2 em código de desvio
         SemType result = logicalType(left.type, right.type, op.lexeme, op.line);
-        return andExpr2(parser, makeAttr(result, left.code));
+
+        backpatch(b1.truelist, m);          // CODEGEN: B1 verdadeiro -> testa B2
+        Expr b = makeBool(b2.truelist, merge(b1.falselist, b2.falselist)); // CODEGEN
+        return andExpr2(parser, makeAttr(result, b));
     }
     return left;
 }
@@ -613,6 +674,10 @@ static Attr relationalExpr(Parser *parser)
 }
 
 // EXPR_RELACIONAL2 → comp EXPR_ADITIVA | ε
+// SDT: B → E1 rel E2  { B.truelist = makelist(nextinstr);
+//                       B.falselist = makelist(nextinstr + 1);
+//                       emit('if' E1.addr rel.op E2.addr 'goto _');
+//                       emit('goto _'); }
 static Attr relationalExpr2(Parser *parser, Attr left)
 {
     if (parser->currentToken.type == TOKEN_COMP)
@@ -621,7 +686,8 @@ static Attr relationalExpr2(Parser *parser, Attr left)
         match(parser, TOKEN_COMP);
         Attr right = additiveExpr(parser);
         SemType result = comparisonType(left.type, right.type, op.lexeme, op.line);
-        return makeAttr(result, left.code);
+        Expr b = emitRelational(op.lexeme, left.code, right.code); // CODEGEN: if E1 rel E2 goto _ / goto _
+        return makeAttr(result, b);
     }
     return left;
 }
@@ -733,10 +799,14 @@ static Attr factor(Parser *parser)
     }
     case TOKEN_NOT:
     {
+        // SDT: B → ! B1  { B.truelist = B1.falselist; B.falselist = B1.truelist; }
+        // Não emite nada além do que B1 já emitiu: só troca as listas.
         Token op = parser->currentToken;
         match(parser, TOKEN_NOT);
         Attr operand = factor(parser);
-        return makeAttr(notType(operand.type, op.line), operand.code);
+        Expr b1 = toCondition(operand.code);           // CODEGEN: B1 em código de desvio
+        Expr b = makeBool(b1.falselist, b1.truelist);  // CODEGEN: troca truelist e falselist
+        return makeAttr(notType(operand.type, op.line), b);
     }
     case TOKEN_OPEN_PAREN:
     {
